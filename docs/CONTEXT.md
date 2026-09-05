@@ -27,8 +27,8 @@ Each source has an enforced byte budget: paths 4 KiB, patch 12 KiB, symbols
 6 KiB, manifests 6 KiB, recent subjects 2 KiB, path history 2 KiB, convention
 2 KiB, branch 256 bytes, issue ID 128 bytes, and activity signals 512 bytes.
 The deterministic preview has
-a 32 KiB aggregate source budget; the Ollama preview has a 12 KiB aggregate
-budget, leaving room below Ollama's 16 KiB prompt limit. Command output is
+a 32 KiB aggregate source budget; Ollama and OpenAI have a 12 KiB aggregate
+budget, leaving room below the provider's 16 KiB prompt limit. Command output is
 streamed into capped buffers, so an oversized diff does not create an
 unbounded in-process output buffer.
 
@@ -44,6 +44,7 @@ Inspect the selected sources without printing their content:
 zsh-git-inlay context --cwd .
 zsh-git-inlay context --cwd . --json
 zsh-git-inlay context --cwd . --provider ollama
+zsh-git-inlay cloud preview --provider openai --cwd . --json
 ```
 
 The output includes source inclusion/exclusion reasons, byte use, truncation,
@@ -58,3 +59,9 @@ fingerprint for diagnostics. When activity signals are present, the record also
 retains only their bounded representation and digest; the daemon rejects it on
 lookup if the current signal digest changed, was cleared, was revoked, or
 expired. The fast lookup does not compile context or read event data.
+
+The OpenAI preview is not a permission grant. It maps only the currently
+granted context classes to an effective redacted subset and reports no source
+content. Its separate cache provenance also hashes the provider, selected
+classes, and selected prompt; [CLOUD.md](CLOUD.md) documents the grant and
+transfer boundary.

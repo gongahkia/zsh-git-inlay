@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/gongahkia/zsh-git-inlay/internal/activity"
+	"github.com/gongahkia/zsh-git-inlay/internal/cloud"
 	"github.com/gongahkia/zsh-git-inlay/internal/gitstate"
 )
 
@@ -108,6 +109,35 @@ func TestCompileRejectsUnknownProvider(t *testing.T) {
 	contextGit(t, repository, "add", "file.go")
 	if _, err := Compile(context.Background(), repository, contextSnapshot(t, repository), "cloud"); err == nil {
 		t.Fatal("unknown provider was accepted")
+	}
+}
+
+func TestCloudSelectionSendsOnlyGrantedRedactedSources(t *testing.T) {
+	repository := contextRepository(t, "main")
+	writeContextFile(t, repository, "src/secret.go", "package src\nconst token = \"ghp_not_sent\"\n")
+	contextGit(t, repository, "add", "src/secret.go")
+	state := contextSnapshot(t, repository)
+	compiled, err := Compile(context.Background(), repository, state, "openai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected, err := compiled.SelectCloud("openai", []cloud.ContextClass{cloud.StagedDiff})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected.Provider != "openai" || selected.ContextFingerprint == "" || len(selected.Sources) == 0 {
+		t.Fatalf("cloud selection=%#v", selected)
+	}
+	for _, source := range selected.Sources {
+		if source.Name != "changed_paths" && source.Name != "staged_patch" {
+			t.Fatalf("ungranted source selected: %#v", source)
+		}
+	}
+	if strings.Contains(selected.Prompt(), "ghp_not_sent") || !strings.Contains(selected.Prompt(), "[REDACTED]") {
+		t.Fatalf("cloud prompt did not preserve redaction: %q", selected.Prompt())
+	}
+	if _, err := compiled.SelectCloud("openai", []cloud.ContextClass{"unknown"}); err == nil {
+		t.Fatal("unknown cloud class accepted")
 	}
 }
 

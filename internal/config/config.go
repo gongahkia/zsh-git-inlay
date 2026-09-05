@@ -162,8 +162,8 @@ func Load() (Settings, error) {
 			return Settings{}, fmt.Errorf("invalid config %s: provider.name must be a string", path)
 		}
 		settings.Provider = unquote(value)
-		if settings.Provider != "deterministic" && settings.Provider != "ollama" {
-			return Settings{}, fmt.Errorf("invalid config %s: provider.name must be deterministic or ollama", path)
+		if settings.Provider != "deterministic" && settings.Provider != "ollama" && settings.Provider != "openai" {
+			return Settings{}, fmt.Errorf("invalid config %s: provider.name must be deterministic, ollama, or openai", path)
 		}
 	}
 	if value, ok := values["provider.model"]; ok {
@@ -193,8 +193,11 @@ func Load() (Settings, error) {
 			return Settings{}, fmt.Errorf("invalid config %s: provider.fallback must be deterministic or none", path)
 		}
 	}
-	if settings.Provider == "ollama" && settings.ProviderModel == "" {
-		return Settings{}, fmt.Errorf("invalid config %s: provider.model is required for ollama", path)
+	if (settings.Provider == "ollama" || settings.Provider == "openai") && settings.ProviderModel == "" {
+		return Settings{}, fmt.Errorf("invalid config %s: provider.model is required for %s", path, settings.Provider)
+	}
+	if settings.Provider == "openai" && settings.ProviderFallback != "none" {
+		return Settings{}, fmt.Errorf("invalid config %s: provider.fallback must be none for openai", path)
 	}
 	if value, ok := values["grounding.ambiguity"]; ok {
 		if !quoted(value) {

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gongahkia/zsh-git-inlay/internal/activity"
+	"github.com/gongahkia/zsh-git-inlay/internal/cloud"
 	"github.com/gongahkia/zsh-git-inlay/internal/gitstate"
 )
 
@@ -44,7 +45,7 @@ type Budget struct {
 }
 
 func budgetFor(provider string) (Budget, error) {
-	if provider != "deterministic" && provider != "ollama" {
+	if provider != "deterministic" && provider != "ollama" && provider != "openai" {
 		return Budget{}, fmt.Errorf("unsupported context provider %q", provider)
 	}
 	budget := Budget{
@@ -60,7 +61,7 @@ func budgetFor(provider string) (Budget, error) {
 		Activity:     512,
 		Total:        32 * 1024,
 	}
-	if provider == "ollama" {
+	if provider == "ollama" || provider == "openai" {
 		budget.Total = 12 * 1024
 	}
 	return budget, nil
@@ -99,6 +100,77 @@ type Compiled struct {
 }
 
 func (compiled Compiled) Prompt() string { return compiled.prompt }
+
+// CloudContext is an inspectable transmission selection. It never exposes
+// source content through JSON, but Prompt contains only sources selected by a
+// user grant after the compiler's relevance and redaction passes.
+type CloudContext struct {
+	Provider           string               `json:"provider"`
+	Classes            []cloud.ContextClass `json:"context_classes"`
+	ContextFingerprint string               `json:"context_fingerprint"`
+	TotalBytes         int                  `json:"total_bytes"`
+	Sources            []Source             `json:"sources"`
+
+	prompt string
+}
+
+func (context CloudContext) Prompt() string { return context.prompt }
+
+// SelectCloud creates the precise subset eligible for one cloud provider. It
+// accepts only the six versioned capability classes and does not infer a grant
+// from repository configuration or another provider's state.
+func (compiled Compiled) SelectCloud(provider string, classes []cloud.ContextClass) (CloudContext, error) {
+	if !cloud.ValidProvider(provider) {
+		return CloudContext{}, fmt.Errorf("unsupported cloud provider %q", provider)
+	}
+	normalized, err := cloud.NormalizeClasses(classes)
+	if err != nil {
+		return CloudContext{}, err
+	}
+	allowed := map[cloud.ContextClass]bool{}
+	for _, class := range normalized {
+		allowed[class] = true
+	}
+	selected := make([]Source, 0, len(compiled.Sources))
+	total := 0
+	for _, source := range compiled.Sources {
+		class, known := sourceClass(source.Name)
+		if !known || !allowed[class] || !source.Included {
+			continue
+		}
+		copy := source
+		selected = append(selected, copy)
+		total += copy.Bytes
+	}
+	prompt := buildPrompt(Compiled{Sources: selected})
+	digest := sha256.Sum256([]byte("cloud-v1\x00" + provider + "\x00" + strings.Join(classesText(normalized), "\x00") + "\x00" + compiled.ContextFingerprint + "\x00" + prompt))
+	return CloudContext{Provider: provider, Classes: normalized, ContextFingerprint: hex.EncodeToString(digest[:]), TotalBytes: total, Sources: selected, prompt: prompt}, nil
+}
+
+func classesText(classes []cloud.ContextClass) []string {
+	result := make([]string, len(classes))
+	for index, class := range classes {
+		result[index] = string(class)
+	}
+	return result
+}
+
+func sourceClass(name string) (cloud.ContextClass, bool) {
+	switch name {
+	case "changed_paths", "staged_patch":
+		return cloud.StagedDiff, true
+	case "nearby_symbols", "project_manifests", "repository_convention":
+		return cloud.RepositoryContext, true
+	case "recent_subjects", "path_history":
+		return cloud.History, true
+	case "branch", "branch_issue":
+		return cloud.BranchIdentifiers, true
+	case "activity_signals":
+		return cloud.Activity, true
+	default:
+		return "", false
+	}
+}
 
 // Evidence is private to deterministic grounding. It is deliberately omitted
 // from the administrative context preview because paths may be sensitive.

@@ -15,6 +15,7 @@ import (
 
 	"github.com/gongahkia/zsh-git-inlay/internal/activity"
 	"github.com/gongahkia/zsh-git-inlay/internal/candidate"
+	"github.com/gongahkia/zsh-git-inlay/internal/cloud"
 	"github.com/gongahkia/zsh-git-inlay/internal/config"
 	"github.com/gongahkia/zsh-git-inlay/internal/gitstate"
 	"github.com/gongahkia/zsh-git-inlay/internal/grounding"
@@ -157,6 +158,69 @@ func TestExplicitDeterministicFallbackPublishesAfterProviderFailure(t *testing.T
 	server.mu.Unlock()
 	if !found || record.Provider.Name != "deterministic" {
 		t.Fatalf("explicit fallback record = %#v found=%t", record, found)
+	}
+}
+
+func TestCloudGenerationRequiresGrantAndRevocationRejectsCachedCandidate(t *testing.T) {
+	server, _ := testServer(t)
+	grants, err := cloud.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.cloud = grants
+	capturing := &cloudCapturingProvider{}
+	server.provider, server.fallback = capturing, nil
+	repository := daemonRepository(t, "cloud.go")
+	state := daemonSnapshot(t, repository)
+	server.generate(context.Background(), state, repository, 1)
+	if capturing.calls != 0 {
+		t.Fatal("cloud provider ran without a user grant")
+	}
+	if _, err := grants.Set("openai", []cloud.ContextClass{cloud.OutputExcerpts}); err != nil {
+		t.Fatal(err)
+	}
+	server.generate(context.Background(), state, repository, 2)
+	if capturing.calls != 0 {
+		t.Fatal("cloud provider ran without an available granted source")
+	}
+	if _, err := grants.Set("openai", []cloud.ContextClass{cloud.StagedDiff}); err != nil {
+		t.Fatal(err)
+	}
+	server.generate(context.Background(), state, repository, 3)
+	if capturing.calls != 1 || strings.Contains(capturing.request.Context, "recent_subjects") || !strings.Contains(capturing.request.Context, "staged_patch") {
+		t.Fatalf("cloud request=%#v calls=%d", capturing.request, capturing.calls)
+	}
+	server.mu.Lock()
+	record, found := server.cache[state.Fingerprint]
+	server.mu.Unlock()
+	if !found || record.Cloud == nil || !cloud.SameClasses(record.Cloud.Classes, []cloud.ContextClass{cloud.StagedDiff}) || record.Cloud.ContextFingerprint != capturing.request.ContextFingerprint {
+		t.Fatalf("cloud record=%#v found=%t calls=%d request=%#v", record, found, capturing.calls, capturing.request)
+	}
+	if err := grants.Revoke("openai"); err != nil {
+		t.Fatal(err)
+	}
+	if reply := server.lookup(ipc.Request{Version: ipc.Version, Operation: "lookup", Fingerprint: state.Fingerprint, Repository: state.RepoID, Worktree: state.WorktreeID}); reply.Status != "stale" {
+		t.Fatalf("revoked cloud lookup=%#v", reply)
+	}
+	if _, err := os.Stat(server.cachePath(state.Fingerprint)); !os.IsNotExist(err) {
+		t.Fatalf("revoked cloud cache remains: %v", err)
+	}
+}
+
+func TestCloudGrantChangeCancelsInflightBackgroundJob(t *testing.T) {
+	server, _ := testServer(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	server.mu.Lock()
+	server.jobs["cloud-job"] = job{cancel: cancel, id: 1}
+	server.mu.Unlock()
+	if reply := server.cloudChanged("openai"); reply.Status != "ready" {
+		t.Fatalf("cloud change=%#v", reply)
+	}
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("cloud grant change did not cancel in-flight job")
 	}
 }
 
@@ -336,6 +400,23 @@ func (capture *contextCapturingProvider) Metadata() provider.Metadata {
 func (capture *contextCapturingProvider) Generate(ctx context.Context, request provider.Request) (provider.Response, error) {
 	capture.request = request
 	return provider.Deterministic{}.Generate(ctx, request)
+}
+
+type cloudCapturingProvider struct {
+	request provider.Request
+	calls   int
+}
+
+func (*cloudCapturingProvider) Metadata() provider.Metadata {
+	return provider.Metadata{Name: "openai", Model: "gpt-5", Quantization: "provider_managed", Runtime: "openai-cloud", PromptVersion: config.ProviderPromptVersion}
+}
+
+func (capture *cloudCapturingProvider) Generate(ctx context.Context, request provider.Request) (provider.Response, error) {
+	if request.Authorized == nil || !request.Authorized(ctx) {
+		return provider.Response{}, fmt.Errorf("cloud request was not authorized")
+	}
+	capture.request, capture.calls = request, capture.calls+1
+	return provider.Response{Metadata: capture.Metadata(), Candidates: []provider.Candidate{{Type: "chore", Scope: "repo", Subject: "update staged cloud", EvidenceIDs: []string{"change:0"}}}}, nil
 }
 
 func TestMalformedSocketRequestIsRejected(t *testing.T) {

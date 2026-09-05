@@ -2,12 +2,15 @@
 
 ## Implemented in Milestone 2
 
-The daemon has a small provider boundary with two implementations:
+The daemon has a small provider boundary with three implementations:
 
 - `deterministic` is the default and needs no model runtime. It remains the
   test oracle and conservative fallback.
 - `ollama` calls only `http://127.0.0.1:11434`. It never downloads or pulls a
   model, and it rejects non-loopback endpoints.
+- `openai` is a default-deny cloud adapter. It can run only after a separate
+  user-private `openai` context grant and exact staged-state revalidation; it
+  has no automatic fallback.
 
 Ollama uses its documented local `/api/tags`, `/api/show`, and non-streaming
 `/api/generate` endpoints. Generation requests use a JSON schema, bounded
@@ -23,17 +26,43 @@ does not pull, run, or contact a remote model service.
 
 ```toml
 [provider]
-name = "deterministic" # or "ollama"
-# model = "qwen2.5-coder:0.5b" # required when name = "ollama"
+name = "deterministic" # or "ollama" or "openai"
+# model = "qwen2.5-coder:0.5b" # required when name = "ollama" or "openai"
 timeout = "8s"
 fallback = "deterministic" # or "none"
 ```
 
-Fallback is an explicit user configuration policy. With `fallback =
+Fallback is an explicit user configuration policy for local providers. With `fallback =
 "deterministic"`, an unavailable, malformed, cancelled, or failed Ollama
 request falls back to deterministic generation in the daemon. With `none`, the
-failed generation produces no candidate. There is no cloud provider and no
-local-to-cloud fallback.
+failed generation produces no candidate. `openai` requires `fallback = "none"`;
+there is no local-to-cloud or cloud-to-local automatic fallback.
+
+## Explicit OpenAI cloud adapter
+
+`openai` uses the documented [Responses API](https://platform.openai.com/docs/api-reference/responses)
+with a Bearer key, non-streaming strict JSON schema output, and `store: false`.
+The endpoint is fixed in the adapter; configuration has no endpoint or
+credential key. After authorization and only at request time, the adapter reads
+`OPENAI_API_KEY`. A missing key, missing/invalid grant, revocation, timeout,
+network failure, malformed response, or stale state publishes no cloud
+candidate and does not affect ordinary Git or Zsh behavior.
+
+```toml
+[provider]
+name = "openai"
+model = "gpt-5"
+timeout = "8s"
+fallback = "none"
+```
+
+Cloud grants are not provider configuration and cannot appear in repository
+policy. The user must preview and explicitly replace the complete selected
+class set with `--confirm`; every provider has an independent grant. The
+context compiler's redaction/relevance pass precedes selection and transfer.
+`cloud preview --provider openai --cwd . --json` exposes categories and bounds,
+never source content. See [CLOUD.md](CLOUD.md) for the class mapping, cache
+identity, revocation behavior, and live-validation limitation.
 
 Provider name, configured model, timeout, fallback policy, and prompt version
 are covered by the global configuration version incorporated into the staged
@@ -58,6 +87,14 @@ selection, and per-source/aggregate limits. Ollama is not installed on the curre
 Fedora host, so live-server/model validation and a comparison against
 Qwen2.5-Coder 0.5B are unavailable. No model was downloaded. Deterministic
 remains the selected default until a local model passes the evaluation gate.
+
+OpenAI mock tests cover no-request-before-grant/current-state proof, key
+non-serialization, Responses request/structured-output contract, cancellation,
+one-retry cap, no retry after staged supersession, selected/redacted source
+transfer, per-provider grant isolation, preview, and cached-result rejection
+after revocation. No OpenAI key, live account, or live provider request was
+used, so live compatibility, billing, availability, and model-quality results
+are unavailable.
 
 ## Managed runtime status
 

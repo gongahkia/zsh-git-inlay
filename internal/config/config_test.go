@@ -36,6 +36,8 @@ func TestLoadRejectsUnsafeProviderConfiguration(t *testing.T) {
 	for _, content := range []string{
 		"[provider]\nname = \"ollama\"\n",
 		"[provider]\nname = \"cloud\"\n",
+		"[provider]\nname = \"openai\"\nmodel = \"gpt-5\"\n",
+		"[provider]\napi_key = \"not-allowed\"\n",
 		"[provider]\nmodel = \"http://example.invalid/model\"\n",
 		"[provider]\ntimeout = \"100ms\"\n",
 		"[provider]\nfallback = \"cloud\"\n",
@@ -52,6 +54,22 @@ func TestLoadRejectsUnsafeProviderConfiguration(t *testing.T) {
 	}
 }
 
+func TestLoadAcceptsExplicitOpenAIWithoutCredentialConfiguration(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "zsh-git-inlay", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("[provider]\nname = \"openai\"\nmodel = \"gpt-5\"\ntimeout = \"9s\"\nfallback = \"none\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", root)
+	settings, err := Load()
+	if err != nil || settings.Provider != "openai" || settings.ProviderModel != "gpt-5" || settings.ProviderFallback != "none" {
+		t.Fatalf("OpenAI settings=%#v err=%v", settings, err)
+	}
+}
+
 func TestRepositoryConfigRejectsCapabilities(t *testing.T) {
 	repository := t.TempDir()
 	path := filepath.Join(repository, ".zsh-git-inlay.toml")
@@ -65,6 +83,7 @@ func TestRepositoryConfigRejectsCapabilities(t *testing.T) {
 	for _, content := range []string{
 		"[provider]\nendpoint = \"https://example.invalid\"\n",
 		"[permissions]\nactivity = true\n",
+		"[cloud]\nopenai = [\"staged_diff\"]\n",
 		"[commit]\ntypes = 3\n",
 		"[commit]\nscope_paths = [\"../secret=api\"]\n",
 		"[commit]\nscopes = [\"api\"]\nscope_paths = [\"cmd=cli\"]\n",

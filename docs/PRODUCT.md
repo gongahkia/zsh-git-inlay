@@ -5,13 +5,15 @@
 `zsh-git-inlay` is one Zsh product. Its ordinary user interaction is unchanged Git syntax: type `git commit -m ` and let the required `zsh-autosuggestions` renderer show one prepared candidate. The user may accept with their ordinary autosuggestion binding, keep typing to constrain it, dismiss it, or press the configurable cycle binding to choose another already prepared candidate. There is no `git inlay` subcommand, Git wrapper, separate daemon product, editor frontend, menu, spinner, or TUI.
 
 The Go executable's `doctor`, `status`, `fingerprint`, `context`, `candidates`,
-`observe`, `evaluate`, `permissions`, `activity`, `learning`, and `daemon` commands are
+`observe`, `evaluate`, `permissions`, `cloud`, `activity`, `learning`, and `daemon` commands are
 setup, diagnostic, and test facilities only. `evaluate` is an offline
 administrative harness, not an alternative commit-message workflow. The
 deterministic generator remains the default and test oracle. An explicitly
 selected existing local Ollama runtime can generate structured candidates from
 bounded staged-only context; it has mocked contract validation but no
-live-model quality claim on this host.
+live-model quality claim on this host. An explicitly selected OpenAI adapter
+also has mock-only contract validation; it is default-deny until a user grants
+the exact cloud context classes and has no live-provider claim on this host.
 
 ## Product decisions
 
@@ -22,7 +24,11 @@ The following are implemented or settled product decisions:
   be reused. A future managed tiny local model requires a signed manifest and
   explicit consent; no such production distribution is configured. There is no
   silent local-to-cloud fallback.
-- Cloud providers require explicit user capability grants and, after permission, may receive equivalent selected context.
+- OpenAI requires an explicit, private, provider-specific replacement grant for
+  selected versioned context classes, then current staged-state revalidation
+  before each request. It uses no automatic fallback; revocation rejects cached
+  cloud results before rendering. The adapter requests `store: false`, which is
+  not a claim about all provider-side data handling.
 - Activity collection is disabled by default and has a user-only grant,
   user-configurable memory-only retention, per-repository/worktree isolation,
   TTL, redaction, and bounded derived-signal context. Granted Zsh hooks record
@@ -56,7 +62,7 @@ The following are implemented or settled product decisions:
 
 VS Code, JetBrains, model fine-tuning, cross-device synchronization, dashboards,
 and CI enforcement are deferred. This prototype does not implement a managed
-model distribution, cloud providers, output capture, other editor/LSP
+model distribution, output capture, other editor/LSP
 integrations, commit bodies,
 issue trackers, automatic staging, automatic commits, standalone ghost text,
 another shell, GUI/TUI, or telemetry.

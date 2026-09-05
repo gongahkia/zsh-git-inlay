@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gongahkia/zsh-git-inlay/internal/activity"
+	"github.com/gongahkia/zsh-git-inlay/internal/cloud"
 	"github.com/gongahkia/zsh-git-inlay/internal/command"
 	"github.com/gongahkia/zsh-git-inlay/internal/config"
 	"github.com/gongahkia/zsh-git-inlay/internal/daemon"
@@ -66,6 +67,8 @@ func run(arguments []string) error {
 		return modelCommand(arguments[1:])
 	case "permissions":
 		return permissionsCommand(arguments[1:])
+	case "cloud":
+		return cloudCommand(arguments[1:])
 	case "activity":
 		return activityCommand(arguments[1:])
 	case "learning":
@@ -78,7 +81,7 @@ func run(arguments []string) error {
 }
 
 func usage() error {
-	return errors.New("usage: zsh-git-inlay {doctor|config|status|fingerprint|context|observe|suggest|candidates|explain|evaluate|model|permissions|activity|learning|daemon serve|daemon stop}")
+	return errors.New("usage: zsh-git-inlay {doctor|config|status|fingerprint|context|observe|suggest|candidates|explain|evaluate|model|permissions|cloud|activity|learning|daemon serve|daemon stop}")
 }
 
 func commonFlags(name string) (*flag.FlagSet, *string, *bool) {
@@ -500,6 +503,179 @@ func permissionsCommand(arguments []string) error {
 		return err
 	}
 	return printJSON(permissions)
+}
+
+func cloudCommand(arguments []string) error {
+	if len(arguments) == 0 {
+		return errors.New("usage: zsh-git-inlay cloud {status|preview|grant|revoke}")
+	}
+	switch arguments[0] {
+	case "status":
+		return cloudStatus(arguments[1:])
+	case "preview":
+		return cloudPreview(arguments[1:])
+	case "grant":
+		return cloudGrant(arguments[1:])
+	case "revoke":
+		return cloudRevoke(arguments[1:])
+	default:
+		return errors.New("usage: zsh-git-inlay cloud {status|preview|grant|revoke}")
+	}
+}
+
+func cloudStore() (*cloud.Store, error) {
+	directory, err := runtimepath.DataDir()
+	if err != nil {
+		return nil, err
+	}
+	return cloud.New(directory)
+}
+
+func cloudStatus(arguments []string) error {
+	flags := flag.NewFlagSet("cloud status", flag.ContinueOnError)
+	flags.SetOutput(ioDiscard{})
+	jsonOutput := flags.Bool("json", false, "emit JSON")
+	if err := flags.Parse(arguments); err != nil || flags.NArg() != 0 {
+		return errors.New("usage: zsh-git-inlay cloud status [--json]")
+	}
+	store, err := cloudStore()
+	if err != nil {
+		return err
+	}
+	grants, err := store.Status()
+	if err != nil {
+		return err
+	}
+	report := map[string]any{"providers": grants, "available_context_classes": cloud.Classes()}
+	if *jsonOutput {
+		return printJSON(report)
+	}
+	for _, grant := range grants {
+		fmt.Printf("provider: %s\ncontext_classes: %s\n", grant.Provider, joinCloudClasses(grant.Classes))
+	}
+	if len(grants) == 0 {
+		fmt.Println("no cloud context is granted")
+	}
+	return nil
+}
+
+func cloudGrant(arguments []string) error {
+	if len(arguments) == 0 || !cloud.ValidProvider(arguments[0]) {
+		return errors.New("usage: zsh-git-inlay cloud grant openai --classes <comma-separated-classes> --confirm [--json]")
+	}
+	providerName := arguments[0]
+	flags := flag.NewFlagSet("cloud grant", flag.ContinueOnError)
+	flags.SetOutput(ioDiscard{})
+	classesValue := flags.String("classes", "", "comma-separated context classes")
+	confirm := flags.Bool("confirm", false, "confirm complete replacement of this provider grant")
+	jsonOutput := flags.Bool("json", false, "emit JSON")
+	if err := flags.Parse(arguments[1:]); err != nil || flags.NArg() != 0 || !*confirm || *classesValue == "" {
+		return errors.New("usage: zsh-git-inlay cloud grant openai --classes <comma-separated-classes> --confirm [--json]")
+	}
+	classes := make([]cloud.ContextClass, 0)
+	for _, value := range strings.Split(*classesValue, ",") {
+		classes = append(classes, cloud.ContextClass(strings.TrimSpace(value)))
+	}
+	store, err := cloudStore()
+	if err != nil {
+		return err
+	}
+	grant, err := store.Set(providerName, classes)
+	if err != nil {
+		return err
+	}
+	notifyCloudChanged(providerName)
+	if *jsonOutput {
+		return printJSON(grant)
+	}
+	fmt.Printf("provider: %s\ncontext_classes: %s\n", grant.Provider, joinCloudClasses(grant.Classes))
+	return nil
+}
+
+func cloudRevoke(arguments []string) error {
+	if len(arguments) != 1 || !cloud.ValidProvider(arguments[0]) {
+		return errors.New("usage: zsh-git-inlay cloud revoke openai")
+	}
+	store, err := cloudStore()
+	if err != nil {
+		return err
+	}
+	if err := store.Revoke(arguments[0]); err != nil {
+		return err
+	}
+	notifyCloudChanged(arguments[0])
+	fmt.Printf("revoked cloud context for %s\n", arguments[0])
+	return nil
+}
+
+func cloudPreview(arguments []string) error {
+	flags, cwdFlag, jsonOutput := commonFlags("cloud preview")
+	providerName := flags.String("provider", "", "cloud provider")
+	if err := flags.Parse(arguments); err != nil || flags.NArg() != 0 || !cloud.ValidProvider(*providerName) {
+		return errors.New("usage: zsh-git-inlay cloud preview --provider openai [--cwd <directory>] [--json]")
+	}
+	cwd, err := resolveCWD(*cwdFlag)
+	if err != nil {
+		return err
+	}
+	snapshotContext, cancel := gitstate.WithTimeout()
+	defer cancel()
+	state, err := gitstate.Snapshot(snapshotContext, cwd)
+	if err != nil {
+		return err
+	}
+	if state.Availability != gitstate.Ready {
+		return fmt.Errorf("%s: %s", state.Availability, state.Reason)
+	}
+	compiled, err := repoctx.Compile(context.Background(), cwd, state, *providerName)
+	if err != nil {
+		return err
+	}
+	store, err := cloudStore()
+	if err != nil {
+		return err
+	}
+	grant, err := store.Grant(*providerName)
+	if err != nil {
+		return err
+	}
+	report := map[string]any{"provider": *providerName, "granted_context_classes": grant.Classes, "requires_explicit_grant": len(grant.Classes) == 0, "sources": []repoctx.Source{}, "total_bytes": 0}
+	if len(grant.Classes) != 0 {
+		selected, err := compiled.SelectCloud(*providerName, grant.Classes)
+		if err != nil {
+			return err
+		}
+		report["context_fingerprint"] = selected.ContextFingerprint
+		report["sources"] = selected.Sources
+		report["total_bytes"] = selected.TotalBytes
+	}
+	if *jsonOutput {
+		return printJSON(report)
+	}
+	fmt.Printf("provider: %s\ngranted_context_classes: %s\n", *providerName, joinCloudClasses(grant.Classes))
+	if len(grant.Classes) == 0 {
+		fmt.Println("would_send: nothing; an explicit grant is required")
+		return nil
+	}
+	for _, value := range report["sources"].([]repoctx.Source) {
+		fmt.Printf("would_send: %s %d/%d bytes — %s\n", value.Name, value.Bytes, value.Limit, value.Reason)
+	}
+	if len(report["sources"].([]repoctx.Source)) == 0 {
+		fmt.Println("would_send: no currently available source for the granted classes")
+	}
+	return nil
+}
+
+func joinCloudClasses(classes []cloud.ContextClass) string {
+	values := make([]string, len(classes))
+	for index, class := range classes {
+		values[index] = string(class)
+	}
+	return strings.Join(values, ",")
+}
+
+func notifyCloudChanged(providerName string) {
+	_, _ = call(ipc.Request{Version: ipc.Version, Operation: "cloud_changed", Provider: providerName}, 100*time.Millisecond)
 }
 
 func learningCommand(arguments []string) error {

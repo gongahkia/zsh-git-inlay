@@ -83,6 +83,21 @@ existing shell-safe candidate form, and applies the same pre/post-publication
 fingerprint checks. The strategy and lookup paths do not compile context,
 invoke a provider, or wait for inference.
 
+The OpenAI transport is an explicit exception to local-only inference, not a
+fallback route. A user-private provider-specific grant selects a complete set
+of versioned context classes. The daemon maps that grant to an already-redacted
+and relevance-filtered subset of compiled sources. Existing staged cache
+identity includes provider/model configuration and prompt/compiler version;
+cloud provenance hashes the selected class policy, staged context identity, and
+selected prompt. It then rechecks both grant and exact staged identity before
+each HTTP attempt. It sends a non-streaming structured request with
+`store: false` and permits only one retry, after another staged-state check.
+No grant, changed/revoked grant, missing credential, cancellation, outage, or
+malformed response produces no cloud candidate. Lookup reloads the grant before
+serving a cloud record, so revocation cannot render an old cloud-derived result.
+The Zsh strategy still has no network operation. [CLOUD.md](CLOUD.md) documents
+the preview and controls.
+
 After a provider response passes its structural schema, grounding code checks
 its evidence references against the compiled staged context and ranks valid
 messages before publication. It records grounding states and individual

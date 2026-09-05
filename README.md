@@ -7,7 +7,7 @@ git commit -m 'chore(cache): update 2 staged files'
               # ^ prepared autosuggestion; accept with the usual forward-char/end-of-line binding
 ```
 
-This is deliberately a proof of interaction, isolation, cache, and freshness properties. It does not use a cloud service, model download, telemetry, unconsented activity collection, or a second frontend.
+This is deliberately a proof of interaction, isolation, cache, and freshness properties. It makes no cloud request without an explicit per-provider user grant, and does not use a model download, telemetry, unconsented activity collection, or a second frontend.
 
 ## Install
 
@@ -54,9 +54,9 @@ max_age = "168h"
 
 [provider]
 name = "deterministic"
-# model = "qwen2.5-coder:0.5b" # required only for name = "ollama"
+# model = "qwen2.5-coder:0.5b" # required for name = "ollama" or "openai"
 timeout = "8s"
-fallback = "deterministic" # or "none"
+fallback = "deterministic" # or "none"; openai requires "none"
 
 [grounding]
 ambiguity = "conservative" # conservative, quiet, visible, or hintable
@@ -93,8 +93,11 @@ see [the evaluation guide](docs/EVALUATION.md). Evaluation is administrative
 only and does not alter the Zsh suggestion path.
 
 The default provider is deterministic. A locally installed Ollama model can be
-selected explicitly; the plugin never pulls a model and never falls back to a
-cloud service. See [provider configuration and validation status](docs/PROVIDERS.md).
+selected explicitly; the plugin never pulls a model or falls back to cloud.
+OpenAI is an explicitly selected, default-deny cloud adapter that requires a
+private provider grant and `fallback = "none"`; it is not a local fallback.
+See [provider configuration and validation status](docs/PROVIDERS.md) and the
+[cloud grant guide](docs/CLOUD.md).
 
 When Ollama is selected, the daemon compiles a bounded, staged-only context
 before inference. It includes selected patch and repository evidence, redacts
@@ -120,12 +123,17 @@ bounded aggregate style counts from completed local commits, ranks only
 already-grounded candidates, and has inspect/reset/disable/export/import
 controls. See [the learning guide](docs/LEARNING.md).
 
+Cloud preview and grant controls are administrative and never reveal source
+content. A grant is a complete provider-specific replacement and requires
+`--confirm`; revocation immediately makes cloud-derived cache records
+unavailable. See [the cloud grant guide](docs/CLOUD.md).
+
 The runtime socket defaults to `$XDG_RUNTIME_DIR/zsh-git-inlay/daemon.sock`; when that is unavailable, it uses a private XDG cache fallback. `ZSH_GIT_INLAY_RUNTIME_DIR` and `ZSH_GIT_INLAY_CACHE_DIR` are test and troubleshooting overrides.
 
 ## Diagnostics and development
 
 `fingerprint`, `context`, `status`, `candidates`, `explain`, `permissions`,
-`activity`, `learning`, and `daemon stop` are administrative commands, not alternate
+`cloud`, `activity`, `learning`, and `daemon stop` are administrative commands, not alternate
 commit-message workflows:
 
 ```zsh
@@ -136,6 +144,7 @@ zsh-git-inlay status --json
 zsh-git-inlay candidates --cwd .
 zsh-git-inlay explain --cwd . --json
 zsh-git-inlay permissions
+zsh-git-inlay cloud preview --provider openai --cwd . --json
 zsh-git-inlay activity inspect --cwd . --json
 zsh-git-inlay learning inspect --cwd . --json
 zsh-git-inlay suggest --cwd . --buffer 'git commit -m ' --json
@@ -172,4 +181,4 @@ rm "$HOME/.local/bin/zsh-git-inlay"
 
 Optional cached candidates are under `$XDG_CACHE_HOME/zsh-git-inlay` (or `~/.cache/zsh-git-inlay`). Removing that directory is recoverable only from backups; it contains no repository content, only candidate metadata records.
 
-Further design, security, and roadmap details are in [PRODUCT.md](docs/PRODUCT.md), [ARCHITECTURE.md](docs/ARCHITECTURE.md), [ACTIVITY.md](docs/ACTIVITY.md), [LEARNING.md](docs/LEARNING.md), [NEOVIM.md](docs/NEOVIM.md), and [THREAT-MODEL.md](docs/THREAT-MODEL.md).
+Further design, security, and roadmap details are in [PRODUCT.md](docs/PRODUCT.md), [ARCHITECTURE.md](docs/ARCHITECTURE.md), [ACTIVITY.md](docs/ACTIVITY.md), [CLOUD.md](docs/CLOUD.md), [LEARNING.md](docs/LEARNING.md), [NEOVIM.md](docs/NEOVIM.md), and [THREAT-MODEL.md](docs/THREAT-MODEL.md).

@@ -17,6 +17,7 @@ import (
 
 	"github.com/gongahkia/zsh-git-inlay/internal/activity"
 	"github.com/gongahkia/zsh-git-inlay/internal/candidate"
+	"github.com/gongahkia/zsh-git-inlay/internal/cloud"
 	"github.com/gongahkia/zsh-git-inlay/internal/config"
 	"github.com/gongahkia/zsh-git-inlay/internal/gitstate"
 	"github.com/gongahkia/zsh-git-inlay/internal/grounding"
@@ -39,6 +40,16 @@ type Record struct {
 	Grounding          []grounding.Result      `json:"grounding,omitempty"`
 	Activity           activity.Provenance     `json:"activity,omitempty"`
 	Learning           learning.Explanation    `json:"learning,omitempty"`
+	Cloud              *CloudProvenance        `json:"cloud,omitempty"`
+}
+
+// CloudProvenance binds a cached candidate to one provider and the exact
+// consented context policy used for its remote request. It has no source text
+// or credential material.
+type CloudProvenance struct {
+	Provider           string               `json:"provider"`
+	Classes            []cloud.ContextClass `json:"context_classes"`
+	ContextFingerprint string               `json:"context_fingerprint"`
 }
 
 type Status struct {
@@ -85,6 +96,7 @@ type Server struct {
 	ambiguityPolicy  string
 	activity         *activity.Store
 	learner          *learning.Store
+	cloud            *cloud.Store
 	learningMu       sync.Mutex
 	learningProfiles map[string]learning.Profile
 	prepared         map[string]preparedLearning
@@ -122,11 +134,15 @@ func newServer(settings config.Settings, socket, cacheDir string, events *activi
 }
 
 func newServerWithLearning(settings config.Settings, socket, cacheDir string, events *activity.Store, learner *learning.Store) *Server {
+	return newServerWithCloud(settings, socket, cacheDir, events, learner, nil)
+}
+
+func newServerWithCloud(settings config.Settings, socket, cacheDir string, events *activity.Store, learner *learning.Store, grants *cloud.Store) *Server {
 	selected, err := provider.New(settings)
 	if err != nil {
 		selected = provider.Deterministic{}
 	}
-	return &Server{settings: settings, socket: socket, cacheDir: cacheDir, cache: map[string]Record{}, active: map[string]active{}, jobs: map[string]job{}, sem: make(chan struct{}, settings.MaxGenerationJobs), lastUse: time.Now(), cacheStatus: CacheStatus{MaxEntries: settings.CacheMaxRecords, MaxBytes: settings.CacheMaxBytes}, provider: selected, fallback: provider.Fallback(settings), providerVersion: settings.Version, ambiguityPolicy: settings.GroundingPolicy, activity: events, learner: learner, learningProfiles: map[string]learning.Profile{}, prepared: map[string]preparedLearning{}, stop: make(chan struct{})}
+	return &Server{settings: settings, socket: socket, cacheDir: cacheDir, cache: map[string]Record{}, active: map[string]active{}, jobs: map[string]job{}, sem: make(chan struct{}, settings.MaxGenerationJobs), lastUse: time.Now(), cacheStatus: CacheStatus{MaxEntries: settings.CacheMaxRecords, MaxBytes: settings.CacheMaxBytes}, provider: selected, fallback: provider.Fallback(settings), providerVersion: settings.Version, ambiguityPolicy: settings.GroundingPolicy, activity: events, learner: learner, cloud: grants, learningProfiles: map[string]learning.Profile{}, prepared: map[string]preparedLearning{}, stop: make(chan struct{})}
 }
 
 func activitySettings(settings config.Settings) activity.Settings {
@@ -171,10 +187,12 @@ func Serve(ctx context.Context, settings config.Settings, initialCWD string) err
 		return activity.LoadPermissions(permissionsPath)
 	})
 	var learner *learning.Store
+	var grants *cloud.Store
 	if dataErr == nil {
 		learner, _ = learning.New(filepath.Join(dataDir, "learning"))
+		grants, _ = cloud.New(dataDir)
 	}
-	server := newServerWithLearning(settings, socket, cacheDir, events, learner)
+	server := newServerWithCloud(settings, socket, cacheDir, events, learner, grants)
 	if err := server.collectCache(); err != nil {
 		listener.Close()
 		return err
@@ -254,6 +272,8 @@ func (server *Server) handle(connection net.Conn) {
 		reply = server.commitLearning(request.CWD)
 	case "learning_changed":
 		reply = server.learningChanged(request.CWD)
+	case "cloud_changed":
+		reply = server.cloudChanged(request.Provider)
 	case "stop":
 		reply = ipc.Reply{Version: ipc.Version, Status: "stopping"}
 		go server.Close()
@@ -281,6 +301,10 @@ func (server *Server) observe(cwd string) ipc.Reply {
 	}
 	activityProvenance := server.activity.Provenance(state.RepoID, state.WorktreeID)
 	cached, cacheErr := server.load(state.Fingerprint)
+	if cacheErr == nil && cached.Cloud != nil && !server.cloudAllowed(*cached.Cloud) {
+		server.discardRecord(state.Fingerprint, true)
+		cacheErr = os.ErrNotExist
+	}
 	server.mu.Lock()
 	server.evictLocked()
 	previous, seen := server.active[state.Scope()]
@@ -291,7 +315,7 @@ func (server *Server) observe(cwd string) ipc.Reply {
 		}
 	}
 	server.active[state.Scope()] = active{cwd: cwd, seen: time.Now(), fingerprint: state.Fingerprint}
-	if record, ready := server.cache[state.Fingerprint]; ready && !server.expired(record) && matchesActivity(record, activityProvenance) {
+	if record, ready := server.cache[state.Fingerprint]; ready && !server.expired(record) && matchesActivity(record, activityProvenance) && (record.Cloud == nil || server.cloudAllowed(*record.Cloud)) {
 		server.mu.Unlock()
 		return ipc.Reply{Version: ipc.Version, Status: "ready"}
 	}
@@ -333,7 +357,7 @@ func (server *Server) generate(ctx context.Context, expected gitstate.State, cwd
 		server.finish(expected.Fingerprint, jobID)
 		return
 	}
-	generated, err := server.generateCandidates(ctx, cwd, compiled)
+	generated, cloudProvenance, err := server.generateCandidates(ctx, cwd, expected, compiled)
 	if err == nil && ctx.Err() == nil {
 		policy := server.policy()
 		candidates, reports, rankErr := rankCandidates(generated, compiled, policy, repositoryPolicy)
@@ -356,7 +380,7 @@ func (server *Server) generate(ctx context.Context, expected gitstate.State, cwd
 		current, checkErr := gitstate.Snapshot(checkContext, cwd)
 		cancel()
 		if checkErr == nil && current.Availability == gitstate.Ready && current.Fingerprint == expected.Fingerprint {
-			record := Record{Fingerprint: expected.Fingerprint, Repository: expected.RepoID, Worktree: expected.WorktreeID, ContextFingerprint: expected.ContextFingerprint, Candidates: candidates, CreatedAt: time.Now().UTC(), Provider: generated.Metadata, Policy: repositoryPolicy, Grounding: reports, Activity: activityProvenance, Learning: learningExplanation}
+			record := Record{Fingerprint: expected.Fingerprint, Repository: expected.RepoID, Worktree: expected.WorktreeID, ContextFingerprint: expected.ContextFingerprint, Candidates: candidates, CreatedAt: time.Now().UTC(), Provider: generated.Metadata, Policy: repositoryPolicy, Grounding: reports, Activity: activityProvenance, Learning: learningExplanation, Cloud: cloudProvenance}
 			if server.store(record) == nil {
 				finalContext, finalCancel := gitstate.WithTimeout()
 				final, finalErr := gitstate.Snapshot(finalContext, cwd)
@@ -451,19 +475,48 @@ func (server *Server) compileContext(ctx context.Context, cwd string, state gits
 	return repoctx.CompileWithActivity(ctx, cwd, state, name, signals)
 }
 
-func (server *Server) generateCandidates(ctx context.Context, cwd string, compiled repoctx.Compiled) (provider.Response, error) {
+func (server *Server) generateCandidates(ctx context.Context, cwd string, expected gitstate.State, compiled repoctx.Compiled) (provider.Response, *CloudProvenance, error) {
 	server.providerMu.RLock()
 	selected, fallback := server.provider, server.fallback
 	server.providerMu.RUnlock()
 	request := provider.Request{CWD: cwd, Context: compiled.Prompt(), ContextFingerprint: compiled.ContextFingerprint}
+	if provider.IsCloud(selected.Metadata().Name) {
+		if server.cloud == nil {
+			return provider.Response{}, nil, fmt.Errorf("cloud grant storage is unavailable")
+		}
+		grant, err := server.cloud.Grant(selected.Metadata().Name)
+		if err != nil || len(grant.Classes) == 0 {
+			return provider.Response{}, nil, fmt.Errorf("cloud context is not explicitly granted")
+		}
+		transmission, err := compiled.SelectCloud(selected.Metadata().Name, grant.Classes)
+		if err != nil {
+			return provider.Response{}, nil, err
+		}
+		if transmission.TotalBytes == 0 {
+			return provider.Response{}, nil, fmt.Errorf("no selected cloud context is available for the granted classes")
+		}
+		provenance := &CloudProvenance{Provider: transmission.Provider, Classes: transmission.Classes, ContextFingerprint: transmission.ContextFingerprint}
+		request.Context, request.ContextFingerprint = transmission.Prompt(), transmission.ContextFingerprint
+		request.Authorized = func(context.Context) bool { return server.cloudAllowed(*provenance) }
+		request.RetryAllowed = func(context.Context) bool { return server.cloudStateCurrent(ctx, cwd, expected) }
+		if !request.Authorized(ctx) || !request.RetryAllowed(ctx) {
+			return provider.Response{}, nil, fmt.Errorf("cloud transmission is no longer authorized for the staged state")
+		}
+		response, err := selected.Generate(ctx, request)
+		return response, provenance, err
+	}
 	response, err := selected.Generate(ctx, request)
 	if err == nil || fallback == nil {
-		return response, err
+		return response, nil, err
 	}
-	return fallback.Generate(ctx, request)
+	response, err = fallback.Generate(ctx, request)
+	return response, nil, err
 }
 
 func (server *Server) generateFallback(ctx context.Context, cwd string, compiled repoctx.Compiled, selectedName string) (provider.Response, error) {
+	if provider.IsCloud(selectedName) {
+		return provider.Response{}, fmt.Errorf("cloud providers have no automatic fallback")
+	}
 	server.providerMu.RLock()
 	fallback := server.fallback
 	server.providerMu.RUnlock()
@@ -471,6 +524,24 @@ func (server *Server) generateFallback(ctx context.Context, cwd string, compiled
 		return provider.Response{}, fmt.Errorf("no distinct deterministic fallback is configured")
 	}
 	return fallback.Generate(ctx, provider.Request{CWD: cwd, Context: compiled.Prompt(), ContextFingerprint: compiled.ContextFingerprint})
+}
+
+func (server *Server) cloudAllowed(provenance CloudProvenance) bool {
+	if server.cloud == nil || !cloud.ValidProvider(provenance.Provider) || len(provenance.Classes) == 0 || len(provenance.ContextFingerprint) != 64 {
+		return false
+	}
+	grant, err := server.cloud.Grant(provenance.Provider)
+	return err == nil && cloud.SameClasses(grant.Classes, provenance.Classes)
+}
+
+func (server *Server) cloudStateCurrent(ctx context.Context, cwd string, expected gitstate.State) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	checkContext, cancel := gitstate.WithTimeout()
+	defer cancel()
+	current, err := gitstate.Snapshot(checkContext, cwd)
+	return err == nil && current.Availability == gitstate.Ready && current.Fingerprint == expected.Fingerprint
 }
 
 func (server *Server) policy() string {
@@ -544,6 +615,10 @@ func (server *Server) lookup(request ipc.Request) ipc.Reply {
 	}
 	if !server.matchesLearning(record) {
 		server.discardRecord(record.Fingerprint, false)
+		return ipc.Reply{Version: ipc.Version, Status: "stale"}
+	}
+	if record.Cloud != nil && !server.cloudAllowed(*record.Cloud) {
+		server.discardRecord(record.Fingerprint, true)
 		return ipc.Reply{Version: ipc.Version, Status: "stale"}
 	}
 	if !matchesActivity(record, server.activity.Provenance(request.Repository, request.Worktree)) {
@@ -734,6 +809,45 @@ func (server *Server) learningChanged(cwd string) ipc.Reply {
 	server.setLearningProfileLocked(state.RepoID, profile)
 	server.learningMu.Unlock()
 	server.invalidateLearningRepository(state.RepoID)
+	return ipc.Reply{Version: ipc.Version, Status: "ready"}
+}
+
+// cloudChanged removes only records derived from a changed provider grant.
+// lookup independently reloads grants, so a missed notification also fails
+// closed before a cloud-derived suggestion can render.
+func (server *Server) cloudChanged(name string) ipc.Reply {
+	if !cloud.ValidProvider(name) {
+		return ipc.Reply{Version: ipc.Version, Status: "malformed", Error: "unsupported cloud provider"}
+	}
+	server.mu.Lock()
+	// A grant replacement or revocation must also stop an in-flight HTTP
+	// attempt. Jobs are few and bounded; cancelling a concurrent local job only
+	// defers its optional background preparation to the next observation.
+	for _, pending := range server.jobs {
+		pending.cancel()
+	}
+	for fingerprint, record := range server.cache {
+		if record.Cloud != nil && record.Cloud.Provider == name {
+			delete(server.cache, fingerprint)
+		}
+	}
+	server.mu.Unlock()
+	server.cacheMu.Lock()
+	entries, err := os.ReadDir(server.cacheDir)
+	if err == nil {
+		for _, entry := range entries {
+			fingerprint, valid := cacheFilename(entry.Name())
+			if !valid {
+				continue
+			}
+			content, readErr := os.ReadFile(server.cachePath(fingerprint))
+			var record Record
+			if readErr == nil && json.Unmarshal(content, &record) == nil && record.Cloud != nil && record.Cloud.Provider == name {
+				server.removeCachePathLocked(fingerprint, &server.cacheStatus.StaleDiscarded)
+			}
+		}
+	}
+	server.cacheMu.Unlock()
 	return ipc.Reply{Version: ipc.Version, Status: "ready"}
 }
 
@@ -1058,6 +1172,12 @@ func (server *Server) expired(record Record) bool {
 
 func validRecord(record Record, fingerprint string) bool {
 	if record.Fingerprint != fingerprint || record.Repository == "" || record.Worktree == "" || len(record.ContextFingerprint) != 64 || record.CreatedAt.IsZero() || !record.Provider.Valid() || len(record.Candidates) == 0 || len(record.Candidates) > candidate.MaxCandidates || len(record.Grounding) != len(record.Candidates) || !learning.ValidExplanation(record.Learning, len(record.Candidates)) {
+		return false
+	}
+	if record.Cloud != nil && (!provider.IsCloud(record.Provider.Name) || !cloud.ValidProvider(record.Cloud.Provider) || record.Cloud.Provider != record.Provider.Name || len(record.Cloud.ContextFingerprint) != 64 || !cloud.SameClasses(record.Cloud.Classes, record.Cloud.Classes)) {
+		return false
+	}
+	if record.Cloud == nil && provider.IsCloud(record.Provider.Name) {
 		return false
 	}
 	for index, value := range record.Candidates {

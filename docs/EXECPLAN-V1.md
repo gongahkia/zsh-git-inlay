@@ -286,3 +286,31 @@ must remain off the lookup path.
   host scheduling is the strongest available explanation, not a demonstrated
   learning-path regression. Doctor found no daemon or reachable Ollama; no
   model request or download occurred.
+- 2026-09-05: completed Milestone 11's explicit OpenAI cloud capability
+  boundary without a live credential or request. A user-private `0600`
+  provider-specific grant record accepts only a complete, confirmation-gated
+  replacement class set; it contains no repository, source, endpoint, or
+  credential data. Repository policy rejects cloud capability fields. The
+  compiler maps only granted classes to its pre-redacted, relevance-filtered,
+  staged-only sources; preview reports classes, source summaries, and byte
+  bounds without content. `output_excerpts` remains a named future class with
+  no current source, and an empty effective selection makes no request. The
+  OpenAI Responses adapter reads `OPENAI_API_KEY` only after authorization at
+  request time, uses non-streaming strict JSON with `store: false`, enforces
+  prompt/response bounds, permits one retry only after a fresh exact staged
+  check, and has no automatic fallback. Grant replacement/revocation cancels
+  in-flight jobs, invalidates provider-derived records, and lookup reloads the
+  grant before render; cache identity combines existing provider/model/prompt
+  configuration identity with selected-class/redacted-prompt provenance. Mock
+  tests cover contract shape, no request without grant/current-state proof,
+  credential non-serialization, cancellation, supersession, per-provider
+  isolation, redaction, preview, and revocation. `go test -race` for cloud,
+  context, provider, daemon, and CLI packages; `make test`; and `make lint`
+  passed. Three post-change benchmark runs recorded parser 0.204–0.261 us/op,
+  exact snapshot 6.14–6.79 ms/op, deterministic generation 1.11–1.50 ms/op,
+  and warm socket lookup 0.071–0.141 ms/op, all within the existing
+  1 ms/25 ms/0.25 ms absolute budgets. [Inference] The spread is shared-host
+  scheduling noise; cloud code remains off the ZLE/lookup path. `doctor --json`
+  found no daemon or reachable Ollama. Live OpenAI compatibility, billing,
+  availability, and model-quality validation remain unavailable by design; no
+  key was used and no repository content was transmitted.

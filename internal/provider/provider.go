@@ -27,6 +27,11 @@ type Request struct {
 	CWD                string
 	Context            string
 	ContextFingerprint string
+	// Authorized is checked by cloud transports immediately before every HTTP
+	// attempt. It is nil for local providers.
+	Authorized func(context.Context) bool
+	// RetryAllowed revalidates the exact staged state before a cloud retry.
+	RetryAllowed func(context.Context) bool
 }
 
 type Candidate struct {
@@ -61,17 +66,24 @@ func New(settings config.Settings) (Provider, error) {
 		return Deterministic{}, nil
 	case "ollama":
 		return NewOllama(DefaultOllamaURL, settings.ProviderModel, settings.ProviderTimeout)
+	case "openai":
+		return NewOpenAI(settings.ProviderModel, settings.ProviderTimeout)
 	default:
 		return nil, fmt.Errorf("unsupported provider %q", settings.Provider)
 	}
 }
 
 func Fallback(settings config.Settings) Provider {
+	if IsCloud(settings.Provider) {
+		return nil
+	}
 	if settings.ProviderFallback == "deterministic" && settings.Provider != "deterministic" {
 		return Deterministic{}
 	}
 	return nil
 }
+
+func IsCloud(name string) bool { return name == "openai" }
 
 func (value Candidate) Valid() bool {
 	if !messageType.MatchString(value.Type) || value.Subject == "" || len(value.EvidenceIDs) == 0 || len(value.EvidenceIDs) > 8 {

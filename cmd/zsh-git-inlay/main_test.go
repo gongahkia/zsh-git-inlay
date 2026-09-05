@@ -117,6 +117,48 @@ func TestPermissionsCommandsPersistOnlyTheActivityGrant(t *testing.T) {
 	}
 }
 
+func TestCloudCommandsRequireConfirmationPreviewOnlyGrantedCategoriesAndPersistNoSource(t *testing.T) {
+	dataDirectory := t.TempDir()
+	t.Setenv("ZSH_GIT_INLAY_DATA_DIR", dataDirectory)
+	repository := learningRepository(t)
+	if err := os.WriteFile(filepath.Join(repository, "cloud.go"), []byte("package cloud\nconst token = \"ghp_not_exposed\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	commandGit(t, repository, "add", "cloud.go")
+	if err := run([]string{"cloud", "grant", "openai", "--classes", "staged_diff"}); err == nil {
+		t.Fatal("cloud grant did not require confirmation")
+	}
+	withoutGrant, err := captureCommandOutput(func() error {
+		return run([]string{"cloud", "preview", "--provider", "openai", "--cwd", repository, "--json"})
+	})
+	if err != nil || !strings.Contains(withoutGrant, "requires_explicit_grant") || strings.Contains(withoutGrant, "ghp_not_exposed") {
+		t.Fatalf("ungranted cloud preview=%q err=%v", withoutGrant, err)
+	}
+	granted, err := captureCommandOutput(func() error {
+		return run([]string{"cloud", "grant", "openai", "--classes", "staged_diff", "--confirm", "--json"})
+	})
+	if err != nil || !strings.Contains(granted, "staged_diff") || strings.Contains(granted, "ghp_not_exposed") {
+		t.Fatalf("cloud grant=%q err=%v", granted, err)
+	}
+	preview, err := captureCommandOutput(func() error {
+		return run([]string{"cloud", "preview", "--provider", "openai", "--cwd", repository, "--json"})
+	})
+	if err != nil || !strings.Contains(preview, "staged_patch") || strings.Contains(preview, "recent_subjects") || strings.Contains(preview, "ghp_not_exposed") {
+		t.Fatalf("cloud preview=%q err=%v", preview, err)
+	}
+	content, err := os.ReadFile(filepath.Join(dataDirectory, "cloud-grants.json"))
+	if err != nil || strings.Contains(string(content), "ghp_not_exposed") || strings.Contains(string(content), repository) {
+		t.Fatalf("cloud grants=%q err=%v", content, err)
+	}
+	if err := run([]string{"cloud", "revoke", "openai"}); err != nil {
+		t.Fatal(err)
+	}
+	status, err := captureCommandOutput(func() error { return run([]string{"cloud", "status", "--json"}) })
+	if err != nil || !strings.Contains(status, `"providers": []`) {
+		t.Fatalf("cloud status=%q err=%v", status, err)
+	}
+}
+
 func TestActivityEmitCommandUsesConsentAndRedactsProducerData(t *testing.T) {
 	repository := t.TempDir()
 	runtimeDirectory, cacheDirectory, dataDirectory := filepath.Join(t.TempDir(), "runtime"), filepath.Join(t.TempDir(), "cache"), filepath.Join(t.TempDir(), "data")
