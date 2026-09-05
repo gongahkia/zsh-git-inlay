@@ -17,9 +17,17 @@ import (
 	"time"
 
 	"github.com/gongahkia/zsh-git-inlay/internal/candidate"
+	"github.com/gongahkia/zsh-git-inlay/internal/gitstate"
+	"github.com/gongahkia/zsh-git-inlay/internal/provider"
+	"github.com/gongahkia/zsh-git-inlay/internal/repoctx"
 )
 
-const SchemaVersion = "v1"
+const (
+	SchemaVersion  = "v1"
+	CorpusVersion  = "v2"
+	DevelopmentSet = "development"
+	HeldOutSet     = "held_out"
+)
 
 //go:embed testdata/corpus-v1.json
 var embeddedCorpus []byte
@@ -27,9 +35,10 @@ var embeddedCorpus []byte
 var conventionalSubject = regexp.MustCompile(`^(feat|fix|docs|test|refactor|build|chore|ci|perf|style|revert)(\(([a-z0-9._/-]+)\))?!?: .+$`)
 var issueIdentifier = regexp.MustCompile(`(?:#[0-9]+|\b[A-Z][A-Z0-9]+-[0-9]+\b)`)
 var behavioralClaim = regexp.MustCompile(`\b(fix|prevent|ensure|avoid|resolve|eliminate)\b`)
+var testOutcomeClaim = regexp.MustCompile(`\b(?:test|tests|test suite)\s+(?:pass|passes|passed|succeed|succeeds|succeeded)\b`)
 
-// Generator is intentionally small so the corpus can exercise the built-in
-// generator today and model providers once they are introduced.
+// Generator produces candidates outside the interactive path. It deliberately
+// has no capability to write Git state or publish daemon records.
 type Generator interface {
 	Metadata() ProviderMetadata
 	Generate(context.Context, string) ([]candidate.Candidate, error)
@@ -62,13 +71,62 @@ func (DeterministicGenerator) Generate(ctx context.Context, cwd string) ([]candi
 	return candidate.Generate(ctx, cwd)
 }
 
+// ProviderGenerator compiles the same bounded staged context used by the
+// daemon before invoking a local provider for administrative evaluation.
+// Construction has no network effect; Generate remains caller-controlled.
+type ProviderGenerator struct{ Provider provider.Provider }
+
+func NewOllamaGenerator(model string, timeout time.Duration) (ProviderGenerator, error) {
+	ollama, err := provider.NewOllama(provider.DefaultOllamaURL, model, timeout)
+	if err != nil {
+		return ProviderGenerator{}, err
+	}
+	return ProviderGenerator{Provider: ollama}, nil
+}
+
+func (generator ProviderGenerator) Metadata() ProviderMetadata {
+	if generator.Provider == nil {
+		return ProviderMetadata{}
+	}
+	metadata := generator.Provider.Metadata()
+	return ProviderMetadata{Name: metadata.Name, Model: metadata.Model, Quantization: metadata.Quantization, Runtime: metadata.Runtime, PromptVersion: metadata.PromptVersion, Settings: metadata.Settings}
+}
+
+func (generator ProviderGenerator) Generate(ctx context.Context, cwd string) ([]candidate.Candidate, error) {
+	if generator.Provider == nil {
+		return nil, errors.New("evaluation provider is required")
+	}
+	metadata := generator.Provider.Metadata()
+	if metadata.Name != "ollama" {
+		return nil, fmt.Errorf("evaluation provider %q is unsupported", metadata.Name)
+	}
+	state, err := gitstate.Snapshot(ctx, cwd)
+	if err != nil {
+		return nil, err
+	}
+	if state.Availability != gitstate.Ready {
+		return nil, fmt.Errorf("evaluation staged state is %s", state.Availability)
+	}
+	compiled, err := repoctx.Compile(ctx, cwd, state, metadata.Name)
+	if err != nil {
+		return nil, err
+	}
+	response, err := generator.Provider.Generate(ctx, provider.Request{CWD: cwd, Context: compiled.Prompt(), ContextFingerprint: state.ContextFingerprint})
+	if err != nil {
+		return nil, err
+	}
+	return response.ToCandidates()
+}
+
 type Corpus struct {
-	Version string    `json:"version"`
-	Cases   []Fixture `json:"cases"`
+	Version   string    `json:"version"`
+	Cases     []Fixture `json:"cases"`
+	Partition string    `json:"-"`
 }
 
 type Fixture struct {
 	ID               string   `json:"id"`
+	Partition        string   `json:"partition"`
 	ReferenceSubject string   `json:"reference_subject"`
 	Convention       string   `json:"convention,omitempty"`
 	AllowedScopes    []string `json:"allowed_scopes,omitempty"`
@@ -108,6 +166,7 @@ type Report struct {
 
 type Source struct {
 	Kind          string `json:"kind"`
+	Partition     string `json:"partition,omitempty"`
 	Eligible      int    `json:"eligible_commits,omitempty"`
 	SkippedMerges int    `json:"skipped_merges,omitempty"`
 }
@@ -134,7 +193,9 @@ type Summary struct {
 	ChangedComponent        Check   `json:"changed_component"`
 	UnsupportedComponent    Check   `json:"unsupported_component"`
 	UnsupportedIssue        Check   `json:"unsupported_issue_identifier"`
+	UnsupportedTestOutcome  Check   `json:"unsupported_test_outcome_claim"`
 	UnsupportedBehavior     Check   `json:"unsupported_behavioral_claim"`
+	StructuralGrounding     Check   `json:"structural_grounding_coverage"`
 	AverageDiversity        float64 `json:"average_diversity"`
 	ColdLatencyMilliseconds float64 `json:"cold_latency_ms"`
 	WarmLatencyMilliseconds float64 `json:"warm_latency_ms"`
@@ -159,15 +220,17 @@ type Result struct {
 }
 
 type AutomaticChecks struct {
-	ValidOutput          Check   `json:"valid_output_schema"`
-	Conventional         Check   `json:"conventional_commit"`
-	AllowedScope         Check   `json:"allowed_scope"`
-	SubjectLength        Check   `json:"subject_length"`
-	ChangedComponent     Check   `json:"changed_component"`
-	UnsupportedComponent Check   `json:"unsupported_component"`
-	UnsupportedIssue     Check   `json:"unsupported_issue_identifier"`
-	UnsupportedBehavior  Check   `json:"unsupported_behavioral_claim"`
-	Diversity            float64 `json:"diversity"`
+	ValidOutput            Check   `json:"valid_output_schema"`
+	Conventional           Check   `json:"conventional_commit"`
+	AllowedScope           Check   `json:"allowed_scope"`
+	SubjectLength          Check   `json:"subject_length"`
+	ChangedComponent       Check   `json:"changed_component"`
+	UnsupportedComponent   Check   `json:"unsupported_component"`
+	UnsupportedIssue       Check   `json:"unsupported_issue_identifier"`
+	UnsupportedTestOutcome Check   `json:"unsupported_test_outcome_claim"`
+	UnsupportedBehavior    Check   `json:"unsupported_behavioral_claim"`
+	StructuralGrounding    Check   `json:"structural_grounding_coverage"`
+	Diversity              float64 `json:"diversity"`
 }
 
 type Generation struct {
@@ -186,7 +249,7 @@ func LoadCorpus() (Corpus, error) {
 	if err := json.Unmarshal(embeddedCorpus, &corpus); err != nil {
 		return Corpus{}, fmt.Errorf("decode embedded evaluation corpus: %w", err)
 	}
-	if corpus.Version != SchemaVersion || len(corpus.Cases) == 0 {
+	if corpus.Version != CorpusVersion || len(corpus.Cases) == 0 {
 		return Corpus{}, errors.New("invalid embedded evaluation corpus")
 	}
 	for _, fixture := range corpus.Cases {
@@ -197,12 +260,36 @@ func LoadCorpus() (Corpus, error) {
 	return corpus, nil
 }
 
+// Partition returns an explicit development or held-out slice of the public
+// corpus. "all" retains every case and is useful for regression coverage, not
+// model-selection reporting.
+func Partition(corpus Corpus, partition string) (Corpus, error) {
+	partition = strings.ReplaceAll(partition, "-", "_")
+	if partition == "" || partition == "all" {
+		corpus.Partition = "all"
+		return corpus, nil
+	}
+	if partition != DevelopmentSet && partition != HeldOutSet {
+		return Corpus{}, fmt.Errorf("unsupported evaluation partition %q", partition)
+	}
+	filtered := Corpus{Version: corpus.Version, Partition: partition}
+	for _, fixture := range corpus.Cases {
+		if fixture.Partition == partition {
+			filtered.Cases = append(filtered.Cases, fixture)
+		}
+	}
+	if len(filtered.Cases) == 0 {
+		return Corpus{}, fmt.Errorf("evaluation partition %q has no cases", partition)
+	}
+	return filtered, nil
+}
+
 func EvaluateCorpus(ctx context.Context, corpus Corpus, generator Generator, options Options) (Report, error) {
 	if generator == nil {
 		return Report{}, errors.New("evaluation generator is required")
 	}
 	options = normaliseOptions(options)
-	report := newReport(corpus.Version, Source{Kind: "synthetic_fixture"}, generator, options)
+	report := newReport(corpus.Version, Source{Kind: "synthetic_fixture", Partition: corpus.Partition}, generator, options)
 	for _, fixture := range corpus.Cases {
 		repository, err := fixtureRepository(ctx, fixture)
 		if err != nil {
@@ -301,24 +388,34 @@ func assess(values []candidate.Candidate, fixture Fixture) AutomaticChecks {
 	issues := stringSet(fixture.IssueIDs)
 	claims := stringSet(fixture.SupportedClaims)
 	for _, value := range values {
-		checks.ValidOutput = check(checks.ValidOutput, candidate.Valid(value))
+		validOutput := candidate.Valid(value)
+		checks.ValidOutput = check(checks.ValidOutput, validOutput)
 		match := conventionalSubject.FindStringSubmatch(value.Message)
+		conventional := true
 		if fixture.Convention == "conventional" {
-			checks.Conventional = check(checks.Conventional, match != nil)
+			conventional = match != nil
+			checks.Conventional = check(checks.Conventional, conventional)
 		}
+		subjectLength := true
 		if fixture.SubjectLength > 0 {
-			checks.SubjectLength = check(checks.SubjectLength, len(value.Message) <= fixture.SubjectLength)
+			subjectLength = len(value.Message) <= fixture.SubjectLength
+			checks.SubjectLength = check(checks.SubjectLength, subjectLength)
 		}
 		scope := ""
 		if len(match) >= 4 {
 			scope = match[3]
 		}
+		allowedScope := true
 		if len(allowedScopes) > 0 {
-			checks.AllowedScope = check(checks.AllowedScope, scope != "" && allowedScopes[scope])
+			allowedScope = scope != "" && allowedScopes[scope]
+			checks.AllowedScope = check(checks.AllowedScope, allowedScope)
 		}
+		changedComponent, unsupportedComponent := true, true
 		if len(components) > 0 {
-			checks.ChangedComponent = check(checks.ChangedComponent, scope != "" && components[scope])
-			checks.UnsupportedComponent = check(checks.UnsupportedComponent, scope == "" || components[scope])
+			changedComponent = scope != "" && components[scope]
+			unsupportedComponent = scope == "" || components[scope]
+			checks.ChangedComponent = check(checks.ChangedComponent, changedComponent)
+			checks.UnsupportedComponent = check(checks.UnsupportedComponent, unsupportedComponent)
 		}
 		unsupportedIssue := false
 		for _, identifier := range issueIdentifier.FindAllString(value.Message, -1) {
@@ -327,6 +424,8 @@ func assess(values []candidate.Candidate, fixture Fixture) AutomaticChecks {
 			}
 		}
 		checks.UnsupportedIssue = check(checks.UnsupportedIssue, !unsupportedIssue)
+		unsupportedTestOutcome := testOutcomeClaim.MatchString(strings.ToLower(value.Message))
+		checks.UnsupportedTestOutcome = check(checks.UnsupportedTestOutcome, !unsupportedTestOutcome)
 		unsupportedClaim := false
 		for _, claim := range behavioralClaim.FindAllString(strings.ToLower(value.Message), -1) {
 			if !claims[claim] {
@@ -334,6 +433,8 @@ func assess(values []candidate.Candidate, fixture Fixture) AutomaticChecks {
 			}
 		}
 		checks.UnsupportedBehavior = check(checks.UnsupportedBehavior, !unsupportedClaim)
+		structurallyGrounded := validOutput && conventional && subjectLength && allowedScope && changedComponent && unsupportedComponent && !unsupportedIssue && !unsupportedTestOutcome && !unsupportedClaim
+		checks.StructuralGrounding = check(checks.StructuralGrounding, structurallyGrounded)
 		unique[value.Message] = true
 	}
 	if len(values) > 0 {
@@ -355,7 +456,9 @@ func summarize(results []Result) Summary {
 		summary.ChangedComponent = merge(summary.ChangedComponent, result.Automatic.ChangedComponent)
 		summary.UnsupportedComponent = merge(summary.UnsupportedComponent, result.Automatic.UnsupportedComponent)
 		summary.UnsupportedIssue = merge(summary.UnsupportedIssue, result.Automatic.UnsupportedIssue)
+		summary.UnsupportedTestOutcome = merge(summary.UnsupportedTestOutcome, result.Automatic.UnsupportedTestOutcome)
 		summary.UnsupportedBehavior = merge(summary.UnsupportedBehavior, result.Automatic.UnsupportedBehavior)
+		summary.StructuralGrounding = merge(summary.StructuralGrounding, result.Automatic.StructuralGrounding)
 		summary.AverageDiversity += result.Automatic.Diversity
 		cold += result.Generation.ColdMilliseconds
 		warm += result.Generation.WarmMilliseconds
@@ -434,6 +537,9 @@ func stringSet(values []string) map[string]bool {
 func validFixture(fixture Fixture) error {
 	if fixture.ID == "" || fixture.ReferenceSubject == "" || len(fixture.Components) == 0 || len(fixture.Changes) == 0 {
 		return errors.New("missing required fixture fields")
+	}
+	if fixture.Partition != DevelopmentSet && fixture.Partition != HeldOutSet {
+		return fmt.Errorf("invalid fixture partition %q", fixture.Partition)
 	}
 	for _, change := range fixture.Changes {
 		if !validPath(change.Path) {

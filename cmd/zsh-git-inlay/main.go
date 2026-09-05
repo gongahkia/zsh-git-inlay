@@ -419,6 +419,8 @@ func evaluateCommand(arguments []string) error {
 	fixtures := flags.Bool("fixtures", false, "run the embedded synthetic corpus")
 	repository := flags.String("repo", "", "replay eligible commits from this local repository")
 	provider := flags.String("provider", "deterministic", "evaluation provider")
+	model := flags.String("model", "", "Ollama model for --provider ollama")
+	partition := flags.String("partition", "all", "fixture partition: all, development, or held-out")
 	timeout := flags.Duration("timeout", evaluation.DefaultOptions().Timeout, "per-generation timeout")
 	limit := flags.Int("limit", evaluation.DefaultOptions().Limit, "maximum historical commits")
 	outputDirectory := flags.String("output-dir", "", "private report directory")
@@ -429,20 +431,44 @@ func evaluateCommand(arguments []string) error {
 	if (*fixtures && *repository != "") || (!*fixtures && *repository == "") {
 		return errors.New("usage: zsh-git-inlay evaluate --fixtures | --repo <local-repository>")
 	}
-	if *provider != "deterministic" {
-		return fmt.Errorf("evaluation provider %q is unavailable; only deterministic is configured in this milestone", *provider)
+	var (
+		generator evaluation.Generator
+		err       error
+	)
+	switch *provider {
+	case "deterministic":
+		if *model != "" {
+			return errors.New("--model requires --provider ollama")
+		}
+		generator = evaluation.DeterministicGenerator{}
+	case "ollama":
+		if *model == "" {
+			return errors.New("--provider ollama requires --model")
+		}
+		generator, err = evaluation.NewOllamaGenerator(*model, *timeout)
+		if err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("evaluation provider %q is unsupported; use deterministic or explicitly selected ollama", *provider)
 	}
 	options := evaluation.Options{Timeout: *timeout, Limit: *limit}
 	var report evaluation.Report
-	var err error
 	if *fixtures {
 		corpus, corpusErr := evaluation.LoadCorpus()
 		if corpusErr != nil {
 			return corpusErr
 		}
-		report, err = evaluation.EvaluateCorpus(context.Background(), corpus, evaluation.DeterministicGenerator{}, options)
+		corpus, corpusErr = evaluation.Partition(corpus, *partition)
+		if corpusErr != nil {
+			return corpusErr
+		}
+		report, err = evaluation.EvaluateCorpus(context.Background(), corpus, generator, options)
 	} else {
-		report, err = evaluation.ReplayHistory(context.Background(), *repository, evaluation.DeterministicGenerator{}, options)
+		if *partition != "all" {
+			return errors.New("--partition applies only to --fixtures")
+		}
+		report, err = evaluation.ReplayHistory(context.Background(), *repository, generator, options)
 	}
 	if err != nil {
 		return err
@@ -612,7 +638,7 @@ func composeCommand(arguments []string) error {
 			_ = os.Remove(path)
 		}
 	}()
-	if err := file.Chmod(0o600); err == nil {
+	if err = file.Chmod(0o600); err == nil {
 		_, err = file.WriteString(plan.Message())
 	}
 	if err == nil {

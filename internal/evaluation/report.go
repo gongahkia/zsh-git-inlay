@@ -43,6 +43,9 @@ func Markdown(report Report) string {
 	fmt.Fprintf(&builder, "Generated: %s  \n", report.GeneratedAt.Format(time.RFC3339))
 	fmt.Fprintf(&builder, "Corpus: %s  \n", report.CorpusVersion)
 	fmt.Fprintf(&builder, "Source: %s  \n", report.Source.Kind)
+	if report.Source.Partition != "" {
+		fmt.Fprintf(&builder, "Partition: %s  \n", report.Source.Partition)
+	}
 	fmt.Fprintf(&builder, "Provider: %s / %s (%s)  \n\n", report.Provider.Name, report.Provider.Model, report.Provider.Runtime)
 	builder.WriteString("## Automatic metrics\n\n")
 	builder.WriteString("| Metric | Passed / checked | Rate |\n| --- | ---: | ---: |\n")
@@ -57,7 +60,9 @@ func Markdown(report Report) string {
 		{"changed component", report.Summary.ChangedComponent},
 		{"no unsupported component", report.Summary.UnsupportedComponent},
 		{"no unsupported issue identifier", report.Summary.UnsupportedIssue},
+		{"no unsupported test outcome", report.Summary.UnsupportedTestOutcome},
 		{"no unsupported behavioral claim", report.Summary.UnsupportedBehavior},
+		{"structural grounding coverage", report.Summary.StructuralGrounding},
 	} {
 		fmt.Fprintf(&builder, "| %s | %d / %d | %.2f%% |\n", row.name, row.check.Passed, row.check.Checked, row.check.Rate*100)
 	}
@@ -96,7 +101,7 @@ func writePrivate(path string, content []byte) error {
 	}
 	name := temporary.Name()
 	defer os.Remove(name)
-	if err := temporary.Chmod(0o600); err == nil {
+	if err = temporary.Chmod(0o600); err == nil {
 		_, err = temporary.Write(content)
 	}
 	if err == nil {

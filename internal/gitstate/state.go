@@ -193,10 +193,10 @@ func copyIndexFile(sourcePath, destinationPath string, remaining int64) (int64, 
 		return 0, fmt.Errorf("inspect Git index: %w", err)
 	}
 	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
-		return 0, fmt.Errorf("Git index is not a regular file")
+		return 0, fmt.Errorf("git index is not a regular file")
 	}
 	if info.Size() > remaining {
-		return 0, fmt.Errorf("Git index and shared indexes exceed %d byte prototype limit", maxIndexBytes)
+		return 0, fmt.Errorf("git index and shared indexes exceed %d byte prototype limit", maxIndexBytes)
 	}
 	source, err := os.Open(sourcePath)
 	if err != nil {

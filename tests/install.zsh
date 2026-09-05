@@ -9,7 +9,7 @@ project=${1:A}
 
 root=$(mktemp -d)
 trap 'command rm -rf -- "$root"' EXIT
-prefix="$root/prefix"
+prefix="$root/prefix with spaces"
 
 command sh "$project/scripts/install.sh" --source "$project" --prefix "$prefix"
 [[ -x "$prefix/bin/zsh-git-inlay" && -r "$prefix/share/zsh-git-inlay/zsh-git-inlay.plugin.zsh" ]] || {
@@ -59,6 +59,47 @@ packaged_version=$(command "$extract/zsh-git-inlay" version --json)
   exit 1
 }
 
+release_prefix="$root/release prefix"
+command sh "$project/scripts/install-release.sh" --archive "$first/zsh-git-inlay_test-0.1.0_linux-amd64.tar.gz" --prefix "$release_prefix"
+[[ -x "$release_prefix/bin/zsh-git-inlay" && -r "$release_prefix/share/zsh-git-inlay/zsh-git-inlay.plugin.zsh" ]] || {
+  print -u2 -- 'release archive install did not create expected files'
+  exit 1
+}
+release_version=$(command "$release_prefix/bin/zsh-git-inlay" version --json)
+[[ $release_version == *'"version": "test-0.1.0"'* ]] || { print -u2 -- 'release archive install lost version metadata'; exit 1 }
+command sh "$project/scripts/uninstall.sh" --prefix "$release_prefix"
+[[ ! -e "$release_prefix/bin/zsh-git-inlay" ]] || { print -u2 -- 'release archive uninstall left binary'; exit 1 }
+
+malicious="$root/malicious"
+command mkdir "$malicious"
+command cp "$extract/zsh-git-inlay" "$extract/zsh-git-inlay.plugin.zsh" "$extract/README.md" "$extract/CHANGELOG.md" "$malicious/"
+print -r -- unexpected > "$malicious/unexpected"
+unexpected_archive="$root/unexpected-member.tar.gz"
+command tar -C "$malicious" -czf "$unexpected_archive" zsh-git-inlay zsh-git-inlay.plugin.zsh README.md CHANGELOG.md unexpected
+if command sh "$project/scripts/install-release.sh" --archive "$unexpected_archive" --prefix "$root/unexpected-prefix" >/dev/null 2>&1; then
+  print -u2 -- 'release installer accepted an unexpected archive member'
+  exit 1
+fi
+command rm "$malicious/zsh-git-inlay"
+command ln -s /etc/passwd "$malicious/zsh-git-inlay"
+link_archive="$root/link-member.tar.gz"
+command tar -C "$malicious" -czf "$link_archive" zsh-git-inlay zsh-git-inlay.plugin.zsh README.md CHANGELOG.md
+if command sh "$project/scripts/install-release.sh" --archive "$link_archive" --prefix "$root/link-prefix" >/dev/null 2>&1; then
+  print -u2 -- 'release installer accepted a symlink binary member'
+  exit 1
+fi
+
+if [[ $(command id -u) -ne 0 ]]; then
+  readonly_parent="$root/readonly"
+  command mkdir "$readonly_parent"
+  command chmod 500 "$readonly_parent"
+  if command sh "$project/scripts/install.sh" --source "$project" --prefix "$readonly_parent/prefix" >/dev/null 2>&1; then
+    print -u2 -- 'installer accepted a permission-denied prefix'
+    exit 1
+  fi
+  command chmod 700 "$readonly_parent"
+fi
+
 export XDG_CACHE_HOME="$root/cache"
 export XDG_STATE_HOME="$root/state"
 export XDG_DATA_HOME="$root/data"
@@ -68,6 +109,15 @@ for base in "$XDG_CACHE_HOME" "$XDG_STATE_HOME" "$XDG_DATA_HOME" "$XDG_CONFIG_HO
   command mkdir -p "$base/zsh-git-inlay"
   print -r -- keep > "$base/sentinel"
 done
+command mkdir -p "$XDG_DATA_HOME/zsh-git-inlay/managed"
+print -r -- model > "$XDG_DATA_HOME/zsh-git-inlay/managed/placeholder"
+print -r -- configuration > "$XDG_CONFIG_HOME/zsh-git-inlay/config.toml"
+command sh "$project/scripts/uninstall.sh" --prefix "$prefix"
+[[ -r "$XDG_CONFIG_HOME/zsh-git-inlay/config.toml" && -r "$XDG_DATA_HOME/zsh-git-inlay/managed/placeholder" ]] || {
+  print -u2 -- 'default uninstall removed retained local data'
+  exit 1
+}
+command sh "$project/scripts/install.sh" --source "$project" --prefix "$prefix"
 command sh "$project/scripts/uninstall.sh" --prefix "$prefix" --purge-local-data
 [[ ! -e "$prefix/bin/zsh-git-inlay" && ! -e "$prefix/share/zsh-git-inlay/zsh-git-inlay.plugin.zsh" ]] || {
   print -u2 -- 'uninstall left installed files'

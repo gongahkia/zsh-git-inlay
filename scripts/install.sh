@@ -38,7 +38,11 @@ case "$prefix" in
 		exit 2
 		;;
 esac
-source_dir=$(CDPATH= cd -- "$source_dir" && pwd -P)
+source_dir=$(
+	CDPATH=''
+	export CDPATH
+	cd -- "$source_dir" && pwd -P
+)
 binary="$source_dir/.build/zsh-git-inlay"
 plugin="$source_dir/zsh-git-inlay.plugin.zsh"
 [ -x "$binary" ] || { printf '%s\n' "build $binary first with make build" >&2; exit 1; }
@@ -63,5 +67,5 @@ tmp_plugin=
 
 printf '%s\n' "installed $bin_dir/zsh-git-inlay"
 printf '%s\n' 'add this after zsh-autosuggestions in .zshrc:'
-printf '  path=("%s/bin" $path)\n' "$prefix"
+printf '%s\n' "  path=(\"$prefix/bin\" \$path)"
 printf '  source "%s/share/zsh-git-inlay/zsh-git-inlay.plugin.zsh"\n' "$prefix"

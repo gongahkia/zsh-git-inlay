@@ -7,7 +7,7 @@ DIST ?= dist/release-snapshot
 LDFLAGS := -s -w -buildid= -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 BUILD_FLAGS := -trimpath -buildvcs=false -ldflags "$(LDFLAGS)"
 
-.PHONY: all build test test-go test-zsh test-eval test-reliability test-nvim test-install test-integration test-soak lint bench release-snapshot clean
+.PHONY: all build test test-go test-zsh test-eval test-reliability test-nvim test-install test-integration test-dogfood test-soak fuzz lint bench release-snapshot clean
 
 all: build
 
@@ -15,7 +15,7 @@ build:
 	mkdir -p $(BUILD_DIR)
 	$(GO) build $(BUILD_FLAGS) -o $(BINARY) ./cmd/zsh-git-inlay
 
-test: test-go test-zsh test-eval test-nvim test-install test-soak
+test: test-go test-zsh test-eval test-nvim test-install test-dogfood test-soak
 
 test-go:
 	$(GO) test ./...
@@ -40,16 +40,28 @@ test-nvim:
 test-install: build
 	zsh tests/install.zsh "$(abspath .)"
 
-test-integration: test-zsh test-eval test-nvim
+test-integration: test-zsh test-eval test-nvim test-dogfood
+
+test-dogfood: build
+	ZSH_GIT_INLAY_BIN=$(abspath $(BINARY)) zsh tests/dogfood.zsh
 
 test-soak: build
 	ZSH_GIT_INLAY_BIN=$(abspath $(BINARY)) zsh tests/soak.zsh
 
+fuzz:
+	$(GO) test -parallel=1 -run '^$$' -fuzz FuzzParseAndSuggestion -fuzztime=$${FUZZ_TIME:-3s} ./internal/command
+	$(GO) test -parallel=1 -run '^$$' -fuzz FuzzReadFrames -fuzztime=$${FUZZ_TIME:-3s} ./internal/ipc
+	$(GO) test -parallel=1 -run '^$$' -fuzz FuzzStructuredResponse -fuzztime=$${FUZZ_TIME:-3s} ./internal/provider
+	$(GO) test -parallel=1 -run '^$$' -fuzz FuzzDeclarativeValues -fuzztime=$${FUZZ_TIME:-3s} ./internal/config
+	$(GO) test -parallel=1 -run '^$$' -fuzz FuzzEventWireFormat -fuzztime=$${FUZZ_TIME:-3s} ./internal/activity
+	$(GO) test -parallel=1 -run '^$$' -fuzz FuzzRemoteNormalizationAndImport -fuzztime=$${FUZZ_TIME:-3s} ./internal/learning
+	$(GO) test -parallel=1 -run '^$$' -fuzz FuzzRedactionAndBounds -fuzztime=$${FUZZ_TIME:-3s} ./internal/repoctx
+
 lint:
 	$(GO) vet ./...
 	test -z "$$($(GO)fmt -l $$(find cmd internal -name '*.go' -print))"
-	zsh -n zsh-git-inlay.plugin.zsh tests/integration.zsh tests/reliability.zsh tests/evaluation.zsh tests/install.zsh tests/soak.zsh
-	sh -n scripts/install.sh scripts/uninstall.sh scripts/checksums.sh scripts/sbom.sh scripts/release-snapshot.sh
+	zsh -n zsh-git-inlay.plugin.zsh tests/integration.zsh tests/reliability.zsh tests/evaluation.zsh tests/install.zsh tests/dogfood.zsh tests/soak.zsh
+	sh -n scripts/install.sh scripts/install-release.sh scripts/uninstall.sh scripts/checksums.sh scripts/sbom.sh scripts/release-snapshot.sh
 	! rg -n '\beval\b|function[[:space:]]+git\b' zsh-git-inlay.plugin.zsh cmd internal
 
 bench:

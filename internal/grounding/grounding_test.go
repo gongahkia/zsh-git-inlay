@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gongahkia/zsh-git-inlay/internal/config"
@@ -46,6 +47,39 @@ func TestEvaluateMarksHeuristicFixPartialAndQuietFiltersIt(t *testing.T) {
 	}
 	if conservative := Rank(results, "conservative"); len(conservative) != 1 {
 		t.Fatalf("conservative omitted partial result: %v", conservative)
+	}
+}
+
+func TestEvaluateAdversarialClaimsAreRejectedOrDemoted(t *testing.T) {
+	compiled := groundedContext(t)
+	results := Evaluate([]provider.Candidate{
+		{Type: "fix", Scope: "parser", Subject: "refactor parser internals", EvidenceIDs: []string{"change:0"}},
+		{Type: "test", Scope: "parser", Subject: "tests passed for parser", EvidenceIDs: []string{"change:0"}},
+		{Type: "fix", Scope: "parser", Subject: "resolve race condition", EvidenceIDs: []string{"change:0"}},
+		{Type: "fix", Scope: "parser", Subject: "prevent production outage", EvidenceIDs: []string{"change:0"}},
+		{Type: "perf", Scope: "parser", Subject: "improve parser performance", EvidenceIDs: []string{"change:0"}},
+		{Type: "fix", Scope: "parser", Subject: "strengthen parser security", EvidenceIDs: []string{"change:0"}},
+		{Type: "docs", Scope: "parser", Subject: "update parser ABC-999", EvidenceIDs: []string{"change:0"}},
+		{Type: "docs", Scope: "cache", Subject: "update cache metadata", EvidenceIDs: []string{"change:0"}},
+		{Type: "docs", Scope: "parser", Subject: "update unstaged parser work", EvidenceIDs: []string{"change:0"}},
+	}, compiled, config.DefaultRepositoryPolicy())
+	if results[0].State != PartiallyGrounded || results[4].State != PartiallyGrounded || results[5].State != PartiallyGrounded {
+		t.Fatalf("heuristic semantic claims were not demoted: %#v", results)
+	}
+	for index, reason := range map[int]string{
+		1: "unsupported test outcome claim",
+		2: "unsupported fix claim",
+		3: "unsupported behavioral claim",
+		6: "unsupported issue identifier",
+		7: "unsupported scope",
+		8: "unsupported unstaged-work claim",
+	} {
+		if results[index].State != Ungrounded || !strings.Contains(strings.Join(results[index].UnsupportedClaims, ","), reason) {
+			t.Fatalf("adversarial result %d=%#v, want %q", index, results[index], reason)
+		}
+	}
+	if quiet := Rank(results, "quiet"); len(quiet) != 0 {
+		t.Fatalf("quiet policy retained semantic inference: %v", quiet)
 	}
 }
 

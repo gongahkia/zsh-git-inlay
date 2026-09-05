@@ -24,6 +24,12 @@ require("zsh-git-inlay").setup({
 })
 ```
 
+The current source and Zsh release installers install only the executable and
+Zsh plugin. Release archives deliberately omit this optional adapter, so an
+archive installation does not make `require("zsh-git-inlay")` available. Use a
+reviewed source checkout on Neovim's runtime path if this existing activity
+producer is wanted.
+
 For `lazy.nvim`:
 
 ```lua

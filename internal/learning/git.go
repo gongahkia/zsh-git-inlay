@@ -71,7 +71,7 @@ func gitOutput(ctx context.Context, cwd string, maximum int64, arguments ...stri
 	if len(output) > int(maximum) {
 		_ = command.Process.Kill()
 		_ = command.Wait()
-		return nil, fmt.Errorf("Git metadata exceeds %d bytes", maximum)
+		return nil, fmt.Errorf("git metadata exceeds %d bytes", maximum)
 	}
 	waitErr := command.Wait()
 	if readErr != nil {

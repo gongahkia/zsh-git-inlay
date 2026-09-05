@@ -39,11 +39,13 @@ type Result struct {
 }
 
 var (
-	issuePattern       = regexp.MustCompile(`\b[A-Z][A-Z0-9]{1,9}-[0-9]{1,7}\b`)
-	wordPattern        = regexp.MustCompile(`[a-z0-9]{3,}`)
-	testClaimPattern   = regexp.MustCompile(`\b(test|tests|testing|coverage|spec)\b`)
-	fixClaimPattern    = regexp.MustCompile(`\b(fix|fixed|fixes|resolve|resolved|repair|prevent|avoid|eliminate|correct)\b`)
-	effectClaimPattern = regexp.MustCompile(`\b(prevent|avoid|eliminate|ensure|guarantee|improve|support|enable|disable)\b`)
+	issuePattern         = regexp.MustCompile(`\b[A-Z][A-Z0-9]{1,9}-[0-9]{1,7}\b`)
+	wordPattern          = regexp.MustCompile(`[a-z0-9]{3,}`)
+	testClaimPattern     = regexp.MustCompile(`\b(test|tests|testing|coverage|spec)\b`)
+	testOutcomePattern   = regexp.MustCompile(`\b(?:test|tests|test suite)\s+(?:pass|passes|passed|succeed|succeeds|succeeded)\b`)
+	fixClaimPattern      = regexp.MustCompile(`\b(fix|fixed|fixes|resolve|resolved|repair|prevent|avoid|eliminate|correct)\b`)
+	effectClaimPattern   = regexp.MustCompile(`\b(prevent|avoid|eliminate|ensure|guarantee|improve|support|enable|disable|strengthen|harden|secure)\b`)
+	unstagedClaimPattern = regexp.MustCompile(`\b(?:unstaged|working[- ]tree)\b`)
 )
 
 var conventionalTypes = map[string]bool{
@@ -140,6 +142,14 @@ func evaluate(value provider.Candidate, evidence map[string]repoctx.Evidence, co
 		if !hasTestPath {
 			result.UnsupportedClaims = append(result.UnsupportedClaims, "unsupported test claim")
 		}
+	}
+	if testOutcomePattern.MatchString(subject) {
+		result.Checks = append(result.Checks, Check{Name: "claimed_test_outcome", Deterministic: true, Passed: false, Detail: "staged context contains no test-execution result"})
+		result.UnsupportedClaims = append(result.UnsupportedClaims, "unsupported test outcome claim")
+	}
+	if unstagedClaimPattern.MatchString(subject) {
+		result.Checks = append(result.Checks, Check{Name: "staged_only_relevance", Deterministic: true, Passed: false, Detail: "unstaged working-tree content is excluded from context"})
+		result.UnsupportedClaims = append(result.UnsupportedClaims, "unsupported unstaged-work claim")
 	}
 	if value.Type == "fix" || fixClaimPattern.MatchString(subject) {
 		passed := componentMatch

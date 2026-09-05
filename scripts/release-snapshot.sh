@@ -34,14 +34,22 @@ case "$commit" in
 	*[!A-Za-z0-9._-]*|"") printf '%s\n' 'invalid release commit' >&2; exit 2 ;;
 esac
 [ ! -e "$output" ] || { printf '%s\n' "release output already exists: $output" >&2; exit 1; }
-source_dir=$(CDPATH= cd -- "$source_dir" && pwd -P)
+source_dir=$(
+	CDPATH=''
+	export CDPATH
+	cd -- "$source_dir" && pwd -P
+)
 [ -f "$source_dir/go.mod" ] && [ -f "$source_dir/zsh-git-inlay.plugin.zsh" ] && [ -f "$source_dir/CHANGELOG.md" ] || {
 	printf '%s\n' 'release source is incomplete' >&2
 	exit 1
 }
 mkdir -p "$(dirname "$output")"
 mkdir "$output"
-script_dir=$(CDPATH= cd -- "$(dirname "$0")" && pwd -P)
+script_dir=$(
+	CDPATH=''
+	export CDPATH
+	cd -- "$(dirname "$0")" && pwd -P
+)
 ldflags="-s -w -buildid= -X main.version=$version -X main.commit=$commit"
 targets='linux-amd64 linux-arm64 darwin-amd64 darwin-arm64'
 cleanup_stage=

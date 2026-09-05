@@ -304,7 +304,7 @@ func writeAtomic(path string, content []byte) error {
 	}
 	name := temporary.Name()
 	defer os.Remove(name)
-	if err := temporary.Chmod(0o600); err == nil {
+	if err = temporary.Chmod(0o600); err == nil {
 		_, err = temporary.Write(content)
 	}
 	if err == nil {

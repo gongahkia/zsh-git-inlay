@@ -2,7 +2,7 @@
 
 Activity is optional local evidence for the daemon. It is disabled by default,
 has no network or telemetry path, and is collected by the Zsh plugin only after
-the user grant. Future Neovim producers use the same protocol. Neither changes
+the user grant. The existing Neovim producer uses the same protocol. Neither changes
 the normal commit-message renderer or command execution path.
 
 Only a user command can change the durable activity grant. The private record

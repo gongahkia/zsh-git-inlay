@@ -87,6 +87,12 @@ selection, and per-source/aggregate limits. Ollama is not installed on the curre
 Fedora host, so live-server/model validation and a comparison against
 Qwen2.5-Coder 0.5B are unavailable. No model was downloaded. Deterministic
 remains the selected default until a local model passes the evaluation gate.
+RC1 researched, but did not install, Qwen2.5-Coder 0.5B (398 MB),
+Qwen2.5-Coder 1.5B (986 MB), and the general Qwen2.5 0.5B comparison model
+(398 MB); all three displayed Ollama manifests as Apache-2.0 at review time.
+The proposed three-model comparison is about 1.782 GB of model downloads,
+separate from the Fedora Ollama package. It requires maintainer approval before
+any download or runtime installation and does not select a recommended model.
 
 OpenAI mock tests cover no-request-before-grant/current-state proof, key
 non-serialization, Responses request/structured-output contract, cancellation,

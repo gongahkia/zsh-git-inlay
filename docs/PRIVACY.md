@@ -15,6 +15,13 @@ background operation and reads bounded staged Git inputs; it redacts common
 secret forms and treats repository text as untrusted data. Redaction is
 defense in depth, not a claim that arbitrary secrets are detectable.
 
+An obsolete record can survive the narrow final-snapshot race until collection.
+It cannot match a later exact fingerprint or scope, and retention is bounded by
+the configured record count, byte limit, and maximum age (512 records, 32 MiB,
+and seven days by default). Candidate records can still contain generated
+metadata derived from staged paths, so users handling sensitive repositories
+should choose tighter cache limits or remove the product cache explicitly.
+
 Learning profiles live in private XDG data storage and contain bounded
 aggregate style counts only—not commit text, bodies, source, activity, remote
 URLs, credentials, candidates, or provider grants. See [LEARNING.md](LEARNING.md).

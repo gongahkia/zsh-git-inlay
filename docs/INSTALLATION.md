@@ -10,6 +10,11 @@ The GitHub Actions workflow is prepared for Linux and macOS but has not run
 from this local checkout. These are not package publications or platform-wide
 compatibility claims.
 
+RC1 validated the source and Linux-archive paths in temporary XDG directories,
+including spaces in the install prefix, reinstall, default local-data
+preservation, explicit purge, and a permission-denied prefix when the host user
+is non-root. It did not execute a macOS binary or a remote CI job.
+
 Requirements are Git, Zsh 5.0.8+, Go 1.26.7 to reproduce the current build,
 and `zsh-autosuggestions` loaded before the plugin. On Fedora, install the
 runtime prerequisites with DNF:
@@ -92,11 +97,30 @@ Run the local release checks with:
 ```zsh
 make test-install
 make release-snapshot VERSION=0.1.0-rc.1 DIST=dist/0.1.0-rc.1
-(cd dist/0.1.0-rc.1 && shasum -a 256 -c checksums.txt)
+(cd dist/0.1.0-rc.1 && sha256sum -c checksums.txt)
 ```
+
+After independently verifying the published checksum, a Linux archive can be
+installed without a source checkout. The installer accepts only the four
+expected member names, streams each into a private staging directory without
+archive extraction, and atomically replaces the same two product files as the
+source installer; it does not modify configuration, cache, state, or
+managed-model data.
+
+```zsh
+sha256sum -c checksums.txt
+sh scripts/install-release.sh \
+  --archive zsh-git-inlay_0.1.0-rc.1_linux-amd64.tar.gz \
+  --prefix "$HOME/.local"
+```
+
+This archive flow was exercised locally with a Linux cross-compiled artifact.
+It is not evidence that a macOS binary has run on macOS.
 
 The repository has no `LICENSE` file. Snapshot generation is useful for
 internal validation, but publishing or redistributing artifacts remains blocked
 until the maintainer selects and adds a license. `CHANGELOG.md` defines the
 Semantic Versioning and approval policy; no tag, package, or GitHub release is
-created by these commands.
+created by these commands. See [LICENSE-REVIEW.md](LICENSE-REVIEW.md) before
+redistribution. Archives include neither Ollama, `zsh-autosuggestions`, model
+weights, cached activity, configuration, nor local evaluation reports.

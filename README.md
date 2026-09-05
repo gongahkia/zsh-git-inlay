@@ -11,7 +11,7 @@ git commit -m 'chore(cache): update 2 staged files'
               # ^ prepared autosuggestion; accept with the usual forward-char/end-of-line binding
 ```
 
-This is deliberately a proof of interaction, isolation, cache, and freshness properties. It makes no cloud request without an explicit per-provider user grant, and does not use a model download, telemetry, unconsented activity collection, or a second frontend.
+This is deliberately a proof of interaction, isolation, cache, and freshness properties. It makes no cloud request without an explicit per-provider user grant, and does not use a model download, telemetry, unconsented activity collection, or a second frontend. The deterministic provider is locally verified; optional Ollama and OpenAI adapters have contract coverage, not live quality evidence. See the [RC1 evidence and release decision](docs/EXECPLAN-RC1.md).
 
 ## Install
 
@@ -29,7 +29,7 @@ sources `zsh-autosuggestions`:
 
 ```zsh
 path=("$HOME/.local/bin" $path)
-source /absolute/path/to/zsh-git-inlay/zsh-git-inlay.plugin.zsh
+source "$HOME/.local/share/zsh-git-inlay/zsh-git-inlay.plugin.zsh"
 ```
 
 The plugin prints an actionable diagnostic and stays inactive when autosuggestions has not been loaded. Check the local setup with:
@@ -180,11 +180,12 @@ make build
 make test
 make lint
 make bench
+make fuzz FUZZ_TIME=3s
 make test-soak
 make test-install
 ```
 
-The integration test uses a real Zsh process and the installed autosuggestions implementation to verify strategy registration, ghost-text strategy output, normal acceptance, cycling, stale rejection, no-staged behavior, dependency diagnostics, and absence of a `git()` override. See [docs/PROTOTYPE.md](docs/PROTOTYPE.md) for its renderer limitation and a manual PTY demonstration.
+The integration and dogfood tests use real Zsh plus the installed autosuggestions implementation. They verify strategy registration, installed-plugin loading, prepared ghost-text output in a pseudo-terminal, widget acceptance/cycling, partial intent, stale rejection, daemon restart, multi-session isolation, dependency diagnostics, and absence of a `git()` override. Automated terminal output is not human visual validation; use the [maintainer checklist](docs/RELEASE-CHECKLIST.md).
 
 ## Uninstall
 
@@ -203,4 +204,6 @@ and roadmap details are in [PRODUCT.md](docs/PRODUCT.md),
 [PRIVACY.md](docs/PRIVACY.md), [ACTIVITY.md](docs/ACTIVITY.md),
 [CLOUD.md](docs/CLOUD.md), [COMPOSE.md](docs/COMPOSE.md),
 [LEARNING.md](docs/LEARNING.md), [NEOVIM.md](docs/NEOVIM.md), and
-[THREAT-MODEL.md](docs/THREAT-MODEL.md).
+[THREAT-MODEL.md](docs/THREAT-MODEL.md). The project-license decision is
+documented in [LICENSE-REVIEW.md](docs/LICENSE-REVIEW.md); no license has been
+selected or added by this RC1 pass.

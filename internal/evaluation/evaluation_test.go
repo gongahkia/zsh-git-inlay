@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gongahkia/zsh-git-inlay/internal/candidate"
+	"github.com/gongahkia/zsh-git-inlay/internal/provider"
 )
 
 func TestSyntheticCorpusEvaluatesDeterministically(t *testing.T) {
@@ -19,8 +20,8 @@ func TestSyntheticCorpusEvaluatesDeterministically(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(corpus.Cases) != 11 {
-		t.Fatalf("fixture count = %d, want 11", len(corpus.Cases))
+	if len(corpus.Cases) != 15 {
+		t.Fatalf("fixture count = %d, want 15", len(corpus.Cases))
 	}
 	report, err := EvaluateCorpus(context.Background(), corpus, DeterministicGenerator{}, DefaultOptions())
 	if err != nil {
@@ -32,13 +33,28 @@ func TestSyntheticCorpusEvaluatesDeterministically(t *testing.T) {
 	if report.Provider.Model == "" || report.Provider.Quantization == "" || report.Provider.Runtime == "" || report.Provider.PromptVersion == "" || report.Environment.GOARCH == "" || report.Environment.CPUs < 1 || report.Settings.Timeout == "" {
 		t.Fatalf("missing reproducibility metadata: %#v", report)
 	}
-	for _, check := range []Check{report.Summary.ValidOutput, report.Summary.Conventional, report.Summary.AllowedScope, report.Summary.SubjectLength, report.Summary.ChangedComponent, report.Summary.UnsupportedComponent, report.Summary.UnsupportedIssue, report.Summary.UnsupportedBehavior} {
+	for _, check := range []Check{report.Summary.ValidOutput, report.Summary.Conventional, report.Summary.AllowedScope, report.Summary.SubjectLength, report.Summary.ChangedComponent, report.Summary.UnsupportedComponent, report.Summary.UnsupportedIssue, report.Summary.UnsupportedTestOutcome, report.Summary.UnsupportedBehavior, report.Summary.StructuralGrounding} {
 		if check.Checked == 0 || check.Passed != check.Checked {
 			t.Fatalf("automatic check = %#v", check)
 		}
 	}
 	if report.Summary.TimeoutRate != 0 || report.Summary.ErrorRate != 0 || report.Summary.AverageDiversity != 1 {
 		t.Fatalf("summary = %#v", report.Summary)
+	}
+	development, err := Partition(corpus, "development")
+	if err != nil || len(development.Cases) != 8 {
+		t.Fatalf("development corpus=%#v err=%v", development, err)
+	}
+	heldOut, err := Partition(corpus, "held-out")
+	if err != nil || len(heldOut.Cases) != 7 {
+		t.Fatalf("held-out corpus=%#v err=%v", heldOut, err)
+	}
+	heldOutReport, err := EvaluateCorpus(context.Background(), heldOut, DeterministicGenerator{}, DefaultOptions())
+	if err != nil || heldOutReport.Source.Partition != HeldOutSet || heldOutReport.Summary.Cases != len(heldOut.Cases) {
+		t.Fatalf("held-out report=%#v err=%v", heldOutReport, err)
+	}
+	if _, err := Partition(corpus, "unknown"); err == nil {
+		t.Fatal("unknown partition was accepted")
 	}
 	encoded, err := json.Marshal(report)
 	if err != nil {
@@ -132,6 +148,26 @@ func TestEvaluationRecordsTimeoutsAndProviderErrors(t *testing.T) {
 	}
 }
 
+func TestProviderGeneratorUsesBoundedStagedContext(t *testing.T) {
+	corpus, err := LoadCorpus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository, err := fixtureRepository(context.Background(), corpus.Cases[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(repository)
+	backend := &capturingProvider{}
+	values, err := (ProviderGenerator{Provider: backend}).Generate(context.Background(), repository)
+	if err != nil || len(values) != 1 || backend.request.Context == "" || backend.request.ContextFingerprint == "" {
+		t.Fatalf("values=%#v request=%#v err=%v", values, backend.request, err)
+	}
+	if len(backend.request.Context) > 16*1024 || !strings.Contains(backend.request.Context, "untrusted repository data") {
+		t.Fatalf("provider context was not bounded/framed: %d bytes", len(backend.request.Context))
+	}
+}
+
 func TestGitEnvironmentRejectsInheritedGitOverrides(t *testing.T) {
 	t.Setenv("GIT_DIR", "/tmp/untrusted-git-directory")
 	for _, entry := range gitEnvironment(nil) {
@@ -150,6 +186,17 @@ func (waitingGenerator) Metadata() ProviderMetadata {
 func (waitingGenerator) Generate(ctx context.Context, _ string) ([]candidate.Candidate, error) {
 	<-ctx.Done()
 	return nil, errors.New("provider stopped")
+}
+
+type capturingProvider struct{ request provider.Request }
+
+func (*capturingProvider) Metadata() provider.Metadata {
+	return provider.Metadata{Name: "ollama", Model: "test", Quantization: "test", Runtime: "test", PromptVersion: "test"}
+}
+
+func (backend *capturingProvider) Generate(_ context.Context, request provider.Request) (provider.Response, error) {
+	backend.request = request
+	return provider.Response{Candidates: []provider.Candidate{{Type: "docs", Scope: "api", Subject: "update staged documentation", EvidenceIDs: []string{"change:0"}}}, Metadata: backend.Metadata()}, nil
 }
 
 func evaluationWrite(t *testing.T, root, name, content string) {

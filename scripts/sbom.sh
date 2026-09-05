@@ -28,7 +28,11 @@ done
 case "$version" in
 	*[!A-Za-z0-9._-]*|"") printf '%s\n' 'invalid release version' >&2; exit 2 ;;
 esac
-module=$(CDPATH= cd -- "$source_dir" && go list -m -f '{{.Path}}')
+module=$(
+	CDPATH=''
+	export CDPATH
+	cd -- "$source_dir" && go list -m -f '{{.Path}}'
+)
 case "$module" in
 	*[!A-Za-z0-9./_-]*|"") printf '%s\n' 'unexpected module identifier' >&2; exit 1 ;;
 esac
