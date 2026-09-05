@@ -2,7 +2,7 @@ GO ?= go
 BUILD_DIR ?= .build
 BINARY := $(BUILD_DIR)/zsh-git-inlay
 
-.PHONY: all build test test-go test-zsh test-eval test-reliability lint bench clean
+.PHONY: all build test test-go test-zsh test-eval test-reliability test-nvim lint bench clean
 
 all: build
 
@@ -10,7 +10,7 @@ build:
 	mkdir -p $(BUILD_DIR)
 	$(GO) build -o $(BINARY) ./cmd/zsh-git-inlay
 
-test: test-go test-zsh test-eval
+test: test-go test-zsh test-eval test-nvim
 
 test-go:
 	$(GO) test ./...
@@ -24,6 +24,13 @@ test-eval: build
 
 test-reliability: build
 	ZSH_GIT_INLAY_BIN=$(abspath $(BINARY)) zsh tests/reliability.zsh
+
+test-nvim:
+	@if command -v nvim >/dev/null 2>&1; then \
+		nvim --headless -u NONE -l tests/neovim.lua "$(abspath .)"; \
+	else \
+		echo "skipping Neovim adapter test: nvim is unavailable"; \
+	fi
 
 lint:
 	$(GO) vet ./...

@@ -245,3 +245,21 @@ must remain off the lookup path.
   ms/op, and warm socket lookup 0.117 ms/op, within the 1 ms/25 ms/0.25 ms
   budgets. Doctor found no running daemon or reachable Ollama; no model
   download occurred.
+- 2026-09-05: completed Milestone 9's sole V1 Neovim adapter. Explicit Lua
+  setup installs only file-open, file-save, and diagnostic-count-transition
+  autocmds; it neither reads buffer content nor has a provider, renderer, or
+  context store. It starts the existing consent-gated local emitter detached,
+  so repository/worktree scope is freshly derived and checked by the established
+  activity protocol. Paths, session IDs, and diagnostic severity counts are
+  bounded; diagnostic prose is never passed to the emitter. Callback and
+  emitter failures are contained, and `disable()` removes the dedicated
+  augroup. The real-Neovim headless test covers emitted kinds/counts, diagnostic
+  text exclusion, module loading, failure containment, and disable cleanup.
+  The existing CLI/daemon consent tests cover the emitter's early default-deny
+  gate before Git-state resolution. `go test -race ./internal/activity
+  ./internal/ipc ./internal/daemon ./cmd/zsh-git-inlay`, `make test`, and
+  `make lint` passed. Benchmark results were parser 0.302 us/op, exact snapshot
+  8.72 ms/op, deterministic generation 1.53 ms/op, and warm socket lookup
+  0.103 ms/op, within the 1 ms/25 ms/0.25 ms budgets. Doctor found no daemon or
+  reachable Ollama; no model request or download occurred. `test-nvim` reports
+  an explicit skip when Neovim is unavailable; this host ran it on Neovim 0.11.6.

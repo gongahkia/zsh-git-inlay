@@ -68,6 +68,11 @@ never retain command arguments or redirect terminal output; failures are
 ignored. Transparent command-output capture is rejected because it would alter
 normal command or terminal semantics.
 
+The optional Neovim Lua module uses the same emitter for file and diagnostic
+count events. It has no provider, renderer, buffer-content reader, or context
+store. Its callbacks are asynchronous and only start after explicit Lua setup;
+[NEOVIM.md](NEOVIM.md) documents its bounded fields and health check.
+
 Provider generation also stays behind the daemon boundary. Before invoking a
 provider, the daemon compiles bounded staged-only context with inspectable
 source and truncation reasons. The context fingerprint is part of the candidate

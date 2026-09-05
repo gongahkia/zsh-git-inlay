@@ -45,12 +45,14 @@ The following are product decisions, not implemented features in this milestone:
   capture, or executable behavior.
 - Normal flow continues to show one suggestion with cycling. Ambiguity defaults to a conservative factual message; users may choose conservative, quiet, visible, or hintable ambiguity behavior.
 - Local preference learning will be enabled by default and scoped per repository. It will adapt ranking and style rather than fine-tune a model. Matching clones will ask before sharing learned preferences.
-- Neovim is the only planned V1 context adapter. It remains an event producer, never a suggestion frontend or independent inference caller.
+- Neovim is the sole V1 editor-context adapter. It is an opt-in event producer,
+  never a suggestion frontend or independent inference caller; it emits bounded
+  file and diagnostic-count transitions only.
 - Optional commit bodies will use a secondary administrative composition flow later.
 
 VS Code, JetBrains, model fine-tuning, cross-device synchronization, dashboards,
 and CI enforcement are deferred. This prototype does not implement a managed
-model distribution, cloud providers, output capture, editor/LSP integration,
-preference learning, commit bodies,
+model distribution, cloud providers, output capture, other editor/LSP
+integrations, preference learning, commit bodies,
 issue trackers, automatic staging, automatic commits, standalone ghost text,
 another shell, GUI/TUI, or telemetry.

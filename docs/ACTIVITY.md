@@ -71,6 +71,10 @@ near the local clock. Unknown schema versions, kinds, sources, oversized data,
 invalid identities, and malformed socket frames are rejected without stopping
 the daemon.
 
+The Neovim adapter is the sole editor producer in this version. It sends only a
+buffer path, session ID, and capped diagnostic severity counts; see
+[NEOVIM.md](NEOVIM.md).
+
 Events expire by TTL and are capped per repository/worktree. The administrative
 view is scoped to the current repository:
 

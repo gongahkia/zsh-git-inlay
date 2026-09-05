@@ -111,6 +111,10 @@ without retaining command arguments or output. Transparent command-output
 capture is intentionally unsupported. See [the local activity
 protocol](docs/ACTIVITY.md).
 
+Neovim 0.10+ can optionally emit bounded file and diagnostic-count activity
+events; it never renders suggestions or reads buffer content. See [the Neovim
+adapter guide](docs/NEOVIM.md).
+
 The runtime socket defaults to `$XDG_RUNTIME_DIR/zsh-git-inlay/daemon.sock`; when that is unavailable, it uses a private XDG cache fallback. `ZSH_GIT_INLAY_RUNTIME_DIR` and `ZSH_GIT_INLAY_CACHE_DIR` are test and troubleshooting overrides.
 
 ## Diagnostics and development
@@ -162,4 +166,4 @@ rm "$HOME/.local/bin/zsh-git-inlay"
 
 Optional cached candidates are under `$XDG_CACHE_HOME/zsh-git-inlay` (or `~/.cache/zsh-git-inlay`). Removing that directory is recoverable only from backups; it contains no repository content, only candidate metadata records.
 
-Further design, security, and roadmap details are in [PRODUCT.md](docs/PRODUCT.md), [ARCHITECTURE.md](docs/ARCHITECTURE.md), [ACTIVITY.md](docs/ACTIVITY.md), and [THREAT-MODEL.md](docs/THREAT-MODEL.md).
+Further design, security, and roadmap details are in [PRODUCT.md](docs/PRODUCT.md), [ARCHITECTURE.md](docs/ARCHITECTURE.md), [ACTIVITY.md](docs/ACTIVITY.md), [NEOVIM.md](docs/NEOVIM.md), and [THREAT-MODEL.md](docs/THREAT-MODEL.md).
