@@ -361,7 +361,10 @@ must remain off the lookup path.
   embedded packaged metadata, and byte-identical dual snapshots. It now runs
   under `make test`; lint checks all added shell files. `go test -race
   ./cmd/zsh-git-inlay`, `make test`, `make lint`, `make test-install`, and a
-  direct `make release-snapshot` passed on Fedora. Two post-change benchmark
+  direct `make release-snapshot` passed on Fedora. A `git archive` source build
+  with Git discovery capped at the extracted tree also passed; it reports the
+  deliberate `commit: unknown` fallback when no repository metadata exists.
+  Two post-change benchmark
   runs recorded parser 0.307–0.561 µs/op, exact snapshot 7.66–14.53 ms/op,
   deterministic generation 1.46–2.39 ms/op, and warm lookup 0.094–0.193
   ms/op: all meet the 1 ms/25 ms/0.25 ms absolute budgets but exceed the M12
