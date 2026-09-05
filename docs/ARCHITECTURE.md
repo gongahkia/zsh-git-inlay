@@ -1,0 +1,46 @@
+# Architecture
+
+## Runtime path
+
+`zsh-git-inlay.plugin.zsh` is the only interactive component. After verifying that `zsh-autosuggestions` is already loaded, it prepends `git-inlay` to `ZSH_AUTOSUGGEST_STRATEGY`; yielding from that strategy lets the user's history and completion strategies continue normally. It does not define `git`, use `eval`, render text, scan a diff, generate candidates, or access a network.
+
+On `precmd`, the plugin starts `zsh-git-inlay daemon serve --observe "$PWD"` in the background when the daemon is absent. Startup is never awaited. The autosuggestion strategy is asynchronous on supported autosuggestions/Zsh versions. Its helper invocation parses a bounded buffer, obtains the current index-tree identity with Git plumbing, then performs a short bounded local Unix-socket lookup. A cache miss, daemon startup, stale state, no staged content, conflict, or unsupported command yields immediately. The helper never requests generation from this path.
+
+The cycle widget increments per-shell selection state and invokes autosuggestions' ordinary asynchronous fetch path with `--no-start`; it cannot launch a daemon or generate work. A `precmd` reset makes the first candidate primary after normal stage/unstage commands return to the prompt. Candidate selection is modulo the deterministic candidate count and wraps after the last candidate.
+
+## Exact fingerprint
+
+For a repository worktree, the engine calculates:
+
+```text
+SHA-256(length-prefix(
+  SHA-256(canonical Git common directory),
+  SHA-256(canonical worktree Git directory),
+  HEAD OID or "unborn:<symbolic ref>",
+  git write-tree OID,
+  "prototype-v1",
+  SHA-256(global relevant config version + repository config version)
+))
+```
+
+`git write-tree` describes exact index content, including modes and renames, without reading the working tree or a staged diff. `git diff --cached --quiet --exit-code` determines whether that index is meaningfully staged against HEAD; unstaged edits therefore retain the same candidate identity. `git ls-files -u` rejects unresolved indexes explicitly. An unborn branch records its symbolic HEAD ref. The common Git directory identifies a repository while the worktree Git directory prevents linked worktrees from sharing candidates.
+
+This uses Git's index representation, not modification timestamps. It is an index operation rather than a repository-wide diff scan; the benchmark records its cost separately. It still starts a short-lived Git helper process, so it belongs in autosuggestions' async strategy process, not a synchronous custom ZLE widget.
+
+## Daemon, IPC, and cache
+
+The daemon is one process per user runtime location. Its listener is a `0600` Unix socket in a `0700` directory under `XDG_RUNTIME_DIR`, with a private XDG cache fallback. A pre-existing live socket is left alone; a non-socket is refused instead of replaced. Cache directories and records are private (`0700` and `0600`).
+
+IPC is a length-prefixed, versioned JSON request/reply protocol with a 16 KiB request and 64 KiB reply ceiling. Requests have a deadline. Invalid sizes, invalid JSON, unknown operations, incompatible versions, and malformed scope identifiers receive explicit rejection. The daemon has no network protocol and accepts only the local Unix socket.
+
+An `observe` request snapshots the repository, bounds active repositories, and deduplicates a job by fingerprint. A new fingerprint for the same repository/worktree cancels the old job. Generation concurrency is bounded. Before publishing, the worker snapshots the same worktree again and discards a mismatched result. Candidate records are written to a private temporary file, synced, closed, and atomically renamed into a content-addressed cache file. A cold daemon loads a matching on-disk record rather than regenerating it.
+
+Git exposes no non-blocking transaction that can hold an index stable between a final `write-tree` check and cache rename without interfering with ordinary Git. Therefore an index update in that tiny interval can leave an obsolete content-addressed record on disk. This is a documented deviation from atomic cache freshness: it cannot become a stale display because every lookup recomputes the exact current fingerprint and requires matching repository/worktree IDs; the next observe schedules the new state. Tests prove both pre-publication supersession rejection and lookup-time stale rejection.
+
+The default idle timeout is 15 minutes. The daemon exits only when it has been idle and has no jobs, and the next background observe starts it again. It never modifies the Git index or creates a commit.
+
+## Prototype provider and parser
+
+The provider invokes `git diff --cached --name-status -z --find-renames`, bounds the metadata to 64 KiB, and uses only status and path metadata. It creates three ordered, deterministic conventional-style messages for documentation, tests, dependencies, or general staged changes. It does not read staged source contents. Candidate count and length are bounded.
+
+The parser accepts only the stated canonical command forms, including `command git commit`, `-m`, `--message`, `-am`, flags before the message, repeated whitespace, and incomplete quote states. It rejects non-end cursors, `--amend`, `--fixup`, `--squash`, other Git commands, shell operators/substitutions, and completed message arguments. A candidate must extend the user prefix. Empty messages receive single quotes; open single or double quotes receive their matching closing quote; an unquoted typed prefix receives a shell-escaped continuation. Generated candidates are restricted to a conservative printable character set before this composition.

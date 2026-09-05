@@ -74,6 +74,9 @@ func Load() (Settings, error) {
 		return Settings{}, fmt.Errorf("invalid config %s: %w", path, err)
 	}
 	if value, ok := values["daemon.idle_timeout"]; ok {
+		if !quoted(value) {
+			return Settings{}, fmt.Errorf("invalid config %s: daemon.idle_timeout must be a string duration", path)
+		}
 		settings.IdleTimeout, err = time.ParseDuration(unquote(value))
 		if err != nil || settings.IdleTimeout <= 0 {
 			return Settings{}, fmt.Errorf("invalid config %s: daemon.idle_timeout must be positive", path)
@@ -92,6 +95,9 @@ func Load() (Settings, error) {
 		}
 	}
 	if value, ok := values["zsh.cycle_keybinding"]; ok {
+		if !quoted(value) {
+			return Settings{}, fmt.Errorf("invalid config %s: zsh.cycle_keybinding must be a string", path)
+		}
 		settings.CycleKeybinding = unquote(value)
 		if settings.CycleKeybinding == "" {
 			return Settings{}, fmt.Errorf("invalid config %s: zsh.cycle_keybinding may not be empty", path)
@@ -119,7 +125,7 @@ func RepositoryVersion(root string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read repository config: %w", err)
 	}
-	_, _, err = parse(string(content), map[string]bool{
+	_, values, err := parse(string(content), map[string]bool{
 		"commit.convention":  true,
 		"commit.types":       true,
 		"commit.scopes":      true,
@@ -127,6 +133,23 @@ func RepositoryVersion(root string) (string, error) {
 	})
 	if err != nil {
 		return "", fmt.Errorf("invalid repository config %s: %w", path, err)
+	}
+	for key, value := range values {
+		switch key {
+		case "commit.convention":
+			if !quoted(value) {
+				return "", fmt.Errorf("invalid repository config %s: commit.convention must be a string", path)
+			}
+		case "commit.types", "commit.scopes":
+			if !stringArray(value) {
+				return "", fmt.Errorf("invalid repository config %s: %s must be a string array", path, key)
+			}
+		case "commit.line_length":
+			length, lengthErr := strconv.Atoi(value)
+			if lengthErr != nil || length < 1 || length > 200 {
+				return "", fmt.Errorf("invalid repository config %s: commit.line_length must be 1..200", path)
+			}
+		}
 	}
 	sum := sha256.Sum256(content)
 	return fmt.Sprintf("%x", sum[:]), nil
@@ -168,8 +191,29 @@ func parse(content string, allowed map[string]bool) (string, map[string]string, 
 }
 
 func unquote(value string) string {
-	if len(value) >= 2 && ((value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\'')) {
+	if quoted(value) {
 		return value[1 : len(value)-1]
 	}
 	return value
+}
+
+func quoted(value string) bool {
+	return len(value) >= 2 && ((value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\''))
+}
+
+func stringArray(value string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) < 2 || value[0] != '[' || value[len(value)-1] != ']' {
+		return false
+	}
+	content := strings.TrimSpace(value[1 : len(value)-1])
+	if content == "" {
+		return true
+	}
+	for _, item := range strings.Split(content, ",") {
+		if !quoted(strings.TrimSpace(item)) {
+			return false
+		}
+	}
+	return true
 }

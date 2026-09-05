@@ -36,6 +36,8 @@ func run(arguments []string) error {
 	switch arguments[0] {
 	case "doctor":
 		return doctor(arguments[1:])
+	case "config":
+		return configCommand(arguments[1:])
 	case "fingerprint":
 		return fingerprint(arguments[1:])
 	case "observe":
@@ -54,7 +56,7 @@ func run(arguments []string) error {
 }
 
 func usage() error {
-	return errors.New("usage: zsh-git-inlay {doctor|status|fingerprint|observe|suggest|candidates|daemon serve|daemon stop}")
+	return errors.New("usage: zsh-git-inlay {doctor|config|status|fingerprint|observe|suggest|candidates|daemon serve|daemon stop}")
 }
 
 func commonFlags(name string) (*flag.FlagSet, *string, *bool) {
@@ -125,41 +127,73 @@ func observe(arguments []string) error {
 }
 
 func suggest(arguments []string) error {
-	flags, cwdFlag, _ := commonFlags("suggest")
+	flags, cwdFlag, jsonOutput := commonFlags("suggest")
 	buffer := flags.String("buffer", "", "current ZLE buffer")
 	cycle := flags.Int("cycle", 0, "candidate index")
+	noStart := flags.Bool("no-start", false, "do not start a daemon")
 	if err := flags.Parse(arguments); err != nil {
 		return err
 	}
-	if len(*buffer) > 4096 {
-		return nil
+	if _, supported := command.Parse(*buffer, len(*buffer)); !supported {
+		return suggestStatus(*jsonOutput, "unsupported_command")
 	}
 	cwd, err := resolveCWD(*cwdFlag)
 	if err != nil {
-		return nil
+		return suggestStatus(*jsonOutput, "outside_repository")
 	}
 	context, cancel := gitstate.WithTimeout()
 	defer cancel()
 	state, err := gitstate.Snapshot(context, cwd)
 	if err != nil || state.Availability != gitstate.Ready {
-		return nil
+		if err != nil {
+			return suggestStatus(*jsonOutput, "error")
+		}
+		return suggestStatus(*jsonOutput, string(state.Availability))
 	}
 	reply, err := call(ipc.Request{Version: ipc.Version, Operation: "lookup", Fingerprint: state.Fingerprint, Repository: state.RepoID, Worktree: state.WorktreeID}, 20*time.Millisecond)
 	if err != nil {
-		_ = ensureDaemon(cwd)
-		return nil
+		if !*noStart {
+			_ = ensureDaemon(cwd)
+			return suggestStatus(*jsonOutput, "daemon_starting")
+		}
+		return suggestStatus(*jsonOutput, "daemon_unavailable")
 	}
 	if reply.Status != "ready" {
-		return nil
+		return suggestStatus(*jsonOutput, reply.Status)
 	}
 	var record daemon.Record
 	if json.Unmarshal(reply.Payload, &record) != nil {
-		return nil
+		return suggestStatus(*jsonOutput, "malformed")
 	}
 	suggestion, ok := command.Suggestion(*buffer, len(*buffer), record.Candidates, *cycle)
-	if ok {
+	if ok && !*jsonOutput {
 		fmt.Print(suggestion)
 	}
+	if !ok {
+		return suggestStatus(*jsonOutput, "constrained_no_match")
+	}
+	if *jsonOutput {
+		return printJSON(map[string]string{"status": "ready", "suggestion": suggestion})
+	}
+	return nil
+}
+
+func suggestStatus(jsonOutput bool, status string) error {
+	if jsonOutput {
+		return printJSON(map[string]string{"status": status})
+	}
+	return nil
+}
+
+func configCommand(arguments []string) error {
+	if len(arguments) != 1 || arguments[0] != "cycle-keybinding" {
+		return errors.New("usage: zsh-git-inlay config cycle-keybinding")
+	}
+	settings, err := config.Load()
+	if err != nil {
+		return err
+	}
+	fmt.Println(settings.CycleKeybinding)
 	return nil
 }
 

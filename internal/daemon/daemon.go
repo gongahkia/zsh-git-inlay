@@ -45,7 +45,8 @@ type Server struct {
 	mu      sync.Mutex
 	cache   map[string]Record
 	active  map[string]active
-	jobs    map[string]context.CancelFunc
+	jobs    map[string]job
+	nextJob uint64
 	sem     chan struct{}
 	lastUse time.Time
 	stop    chan struct{}
@@ -58,8 +59,13 @@ type active struct {
 	fingerprint string
 }
 
+type job struct {
+	cancel context.CancelFunc
+	id     uint64
+}
+
 func New(settings config.Settings, socket, cacheDir string) *Server {
-	return &Server{settings: settings, socket: socket, cacheDir: cacheDir, cache: map[string]Record{}, active: map[string]active{}, jobs: map[string]context.CancelFunc{}, sem: make(chan struct{}, settings.MaxGenerationJobs), lastUse: time.Now(), stop: make(chan struct{})}
+	return &Server{settings: settings, socket: socket, cacheDir: cacheDir, cache: map[string]Record{}, active: map[string]active{}, jobs: map[string]job{}, sem: make(chan struct{}, settings.MaxGenerationJobs), lastUse: time.Now(), stop: make(chan struct{})}
 }
 
 func Serve(ctx context.Context, settings config.Settings, initialCWD string) error {
@@ -176,8 +182,8 @@ func (server *Server) observe(cwd string) ipc.Reply {
 	server.evictLocked()
 	previous, seen := server.active[state.Scope()]
 	if seen && previous.fingerprint != state.Fingerprint {
-		if cancelJob, pending := server.jobs[previous.fingerprint]; pending {
-			cancelJob()
+		if previousJob, pending := server.jobs[previous.fingerprint]; pending {
+			previousJob.cancel()
 			delete(server.jobs, previous.fingerprint)
 		}
 	}
@@ -186,23 +192,30 @@ func (server *Server) observe(cwd string) ipc.Reply {
 		server.mu.Unlock()
 		return ipc.Reply{Version: ipc.Version, Status: "ready"}
 	}
+	if cached, err := server.load(state.Fingerprint); err == nil && cached.Repository == state.RepoID && cached.Worktree == state.WorktreeID {
+		server.cache[state.Fingerprint] = cached
+		server.mu.Unlock()
+		return ipc.Reply{Version: ipc.Version, Status: "ready"}
+	}
 	if _, pending := server.jobs[state.Fingerprint]; pending {
 		server.mu.Unlock()
 		return ipc.Reply{Version: ipc.Version, Status: "pending"}
 	}
 	jobContext, cancelJob := context.WithCancel(context.Background())
-	server.jobs[state.Fingerprint] = cancelJob
+	server.nextJob++
+	jobID := server.nextJob
+	server.jobs[state.Fingerprint] = job{cancel: cancelJob, id: jobID}
 	server.mu.Unlock()
-	go server.generate(jobContext, state, cwd)
+	go server.generate(jobContext, state, cwd, jobID)
 	return ipc.Reply{Version: ipc.Version, Status: "pending"}
 }
 
-func (server *Server) generate(ctx context.Context, expected gitstate.State, cwd string) {
+func (server *Server) generate(ctx context.Context, expected gitstate.State, cwd string, jobID uint64) {
 	select {
 	case server.sem <- struct{}{}:
 		defer func() { <-server.sem }()
 	case <-ctx.Done():
-		server.finish(expected.Fingerprint)
+		server.finish(expected.Fingerprint, jobID)
 		return
 	}
 	candidates, err := candidate.Generate(ctx, cwd)
@@ -219,12 +232,14 @@ func (server *Server) generate(ctx context.Context, expected gitstate.State, cwd
 			}
 		}
 	}
-	server.finish(expected.Fingerprint)
+	server.finish(expected.Fingerprint, jobID)
 }
 
-func (server *Server) finish(fingerprint string) {
+func (server *Server) finish(fingerprint string, jobID uint64) {
 	server.mu.Lock()
-	delete(server.jobs, fingerprint)
+	if current, found := server.jobs[fingerprint]; found && current.id == jobID {
+		delete(server.jobs, fingerprint)
+	}
 	server.mu.Unlock()
 }
 
@@ -282,8 +297,8 @@ func (server *Server) evictLocked() {
 	sort.Slice(pairs, func(left, right int) bool { return pairs[left].seen.Before(pairs[right].seen) })
 	oldest := pairs[0]
 	if current, ok := server.active[oldest.scope]; ok {
-		if cancel, running := server.jobs[current.fingerprint]; running {
-			cancel()
+		if runningJob, running := server.jobs[current.fingerprint]; running {
+			runningJob.cancel()
 			delete(server.jobs, current.fingerprint)
 		}
 	}

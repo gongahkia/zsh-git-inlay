@@ -1,0 +1,18 @@
+# Threat model
+
+This prototype assumes the local user and their repositories can contain hostile paths, staged data, and declarative configuration. It does not attempt to defend against a compromised user account or an attacker who can write the user's private runtime/cache directories.
+
+| Threat | Mitigation and boundary |
+| --- | --- |
+| Command injection from BUFFER or aliases | The parser is data-only and rejects shell operators, substitutions, and unsupported grammar. The plugin contains no `eval`, never overrides `git`, and invokes the helper with quoted positional arguments. Git aliases and shell functions are not discovered or executed. |
+| Generated-text injection | Candidates are deterministic, bounded, never executed, and restricted to a conservative character set. The parser emits quote closures or escaping as syntax data; acceptance is the user's normal autosuggestions action. |
+| Malicious filenames or staged source | Generation reads bounded NUL-delimited name/status metadata only. It does not interpolate filenames into messages except after conservative module normalization, does not log diffs/source, and never reads command output from the project. |
+| Malicious repository configuration | `.zsh-git-inlay.toml` is a strict allowlist of future message-policy keys. It cannot select providers/endpoints, use credentials, enable activity/output capture, change permissions, run hooks, or execute code. Unknown keys fail validation. |
+| Stale-result races | Fingerprints cover repository, worktree, HEAD/unborn ref, exact index tree, generator version, and configuration. The strategy verifies its current fingerprint before lookup. A worker rechecks immediately before publication; superseded jobs are cancelled and mismatched results are discarded. |
+| Cross-repository or linked-worktree leakage | The common Git directory and worktree Git directory are separately hashed in every fingerprint. Cache records carry both scope IDs and lookup checks them before returning a record. |
+| Local socket access | The socket lives in a `0700` per-user directory and is `0600`; a live socket is not unlinked. Protocol version, framing, request/reply sizes, and fields are validated. [Inference] Private directory ownership and modes reduce other-user access on supported Unix systems; a compromised account is out of scope. |
+| Unsafe temporary files or symlink replacement | Runtime/cache paths must be private directories and reject a symlink final path. Cache publication uses a private temporary file plus atomic rename. A non-socket at the socket path is refused. Parent XDG directories remain an operating-system/XDG trust assumption. |
+| Oversized diff, request, or response | Staged metadata is capped at 64 KiB, candidate count at three, messages at 160 bytes, buffers at 4096 bytes, IPC requests at 16 KiB, and IPC replies/cache records at 64 KiB. |
+| Rapid index-change denial of service | Active repository and generation-concurrency limits bound work; jobs for a superseded scope are cancelled. Rapid changes can still cause repeated cheap Git index snapshots, so this is mitigated rather than eliminated. |
+
+There is no network access, telemetry, model provider, LLM invocation, automatic staging, automatic commit, hook execution, or use of repository-supplied executable code in this milestone. The plugin's ZLE path never calculates a diff or runs generation; the daemon owns metadata collection and generation.

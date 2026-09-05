@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -45,22 +44,20 @@ func (s State) Scope() string { return s.RepoID + ":" + s.WorktreeID }
 // Snapshot uses Git plumbing rather than timestamps. write-tree describes the
 // exact index while symbolic-ref keeps distinct unborn branches distinct.
 func Snapshot(ctx context.Context, cwd string) (State, error) {
-	root, err := git(ctx, cwd, "rev-parse", "--show-toplevel")
+	paths, err := git(ctx, cwd, "rev-parse", "--show-toplevel", "--path-format=absolute", "--git-common-dir", "--git-dir")
 	if err != nil {
 		return State{Availability: OutsideRepo, Reason: "outside a Git worktree"}, nil
 	}
+	pathParts := strings.Split(paths, "\n")
+	if len(pathParts) != 3 {
+		return State{}, fmt.Errorf("unexpected Git worktree identity output")
+	}
+	root := pathParts[0]
 	root, err = canonical(root)
 	if err != nil {
 		return State{}, err
 	}
-	commonDir, err := git(ctx, cwd, "rev-parse", "--path-format=absolute", "--git-common-dir")
-	if err != nil {
-		return State{}, fmt.Errorf("find common Git directory: %w", err)
-	}
-	gitDir, err := git(ctx, cwd, "rev-parse", "--path-format=absolute", "--git-dir")
-	if err != nil {
-		return State{}, fmt.Errorf("find worktree Git directory: %w", err)
-	}
+	commonDir, gitDir := pathParts[1], pathParts[2]
 	commonDir, err = canonical(commonDir)
 	if err != nil {
 		return State{}, err
@@ -71,16 +68,9 @@ func Snapshot(ctx context.Context, cwd string) (State, error) {
 	}
 	state := State{Availability: Ready, Root: root, RepoID: digest(commonDir), WorktreeID: digest(gitDir)}
 
-	unmerged, err := git(ctx, cwd, "ls-files", "-u")
-	if err != nil {
-		return State{}, fmt.Errorf("inspect index conflicts: %w", err)
-	}
-	if unmerged != "" {
-		state.Availability, state.Reason = Conflicted, "the index contains unresolved conflicts"
-		return state, nil
-	}
-
-	head, err := git(ctx, cwd, "rev-parse", "--verify", "HEAD")
+	headOutput, err := git(ctx, cwd, "rev-parse", "HEAD", "HEAD^{tree}")
+	headExists := err == nil
+	headTree := ""
 	if err != nil {
 		branch, branchErr := git(ctx, cwd, "symbolic-ref", "-q", "HEAD")
 		if branchErr != nil {
@@ -88,7 +78,11 @@ func Snapshot(ctx context.Context, cwd string) (State, error) {
 		}
 		state.Head = "unborn:" + branch
 	} else {
-		state.Head = head
+		headParts := strings.Split(headOutput, "\n")
+		if len(headParts) != 2 {
+			return State{}, fmt.Errorf("unexpected HEAD identity output")
+		}
+		state.Head, headTree = headParts[0], headParts[1]
 	}
 	tree, err := git(ctx, cwd, "write-tree")
 	if err != nil {
@@ -96,14 +90,19 @@ func Snapshot(ctx context.Context, cwd string) (State, error) {
 	}
 	state.IndexTree = tree
 
-	quietErr := gitExit(ctx, cwd, "diff", "--cached", "--quiet", "--exit-code")
-	if quietErr == nil {
+	if headExists && tree == headTree {
 		state.Availability, state.Reason = NoStaged, "no staged changes"
 		return state, nil
 	}
-	var exitErr *exec.ExitError
-	if !errors.As(quietErr, &exitErr) || exitErr.ExitCode() != 1 {
-		return State{}, fmt.Errorf("compare staged state: %w", quietErr)
+	if !headExists {
+		entries, err := git(ctx, cwd, "ls-files", "--cached", "--stage")
+		if err != nil {
+			return State{}, fmt.Errorf("inspect unborn index: %w", err)
+		}
+		if entries == "" {
+			state.Availability, state.Reason = NoStaged, "no staged changes"
+			return state, nil
+		}
 	}
 
 	settings, err := config.Load()
@@ -127,12 +126,6 @@ func git(ctx context.Context, cwd string, args ...string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSuffix(string(output), "\n"), nil
-}
-
-func gitExit(ctx context.Context, cwd string, args ...string) error {
-	command := exec.CommandContext(ctx, "git", append([]string{"-C", cwd}, args...)...)
-	command.Env = []string{"GIT_OPTIONAL_LOCKS=0"}
-	return command.Run()
 }
 
 func canonical(path string) (string, error) {
