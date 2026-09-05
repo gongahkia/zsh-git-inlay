@@ -6,10 +6,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 )
+
+var policyName = regexp.MustCompile(`^[a-z][a-z0-9._/-]{0,39}$`)
 
 const (
 	DefaultIdleTimeout    = 15 * time.Minute
@@ -215,45 +219,173 @@ func Load() (Settings, error) {
 	return settings, nil
 }
 
-// RepositoryVersion validates only future message-policy settings. It is not a
+type ScopeRule struct {
+	Path  string `json:"path"`
+	Scope string `json:"scope"`
+}
+
+// RepositoryPolicy is intentionally declarative: it cannot grant a privacy or
+// provider capability because its parser only accepts message-shape fields.
+type RepositoryPolicy struct {
+	Source         string      `json:"source"`
+	Version        string      `json:"version"`
+	Convention     string      `json:"convention"`
+	Types          []string    `json:"types"`
+	Scopes         []string    `json:"scopes"`
+	ScopePaths     []ScopeRule `json:"scope_paths"`
+	LineLength     int         `json:"line_length"`
+	Capitalization string      `json:"capitalization"`
+	Body           string      `json:"body"`
+}
+
+func DefaultRepositoryPolicy() RepositoryPolicy {
+	return RepositoryPolicy{Source: "built-in", Version: "none", Convention: "conventional", LineLength: 120, Capitalization: "lower", Body: "optional"}
+}
+
+// LoadRepositoryPolicy validates only message-policy settings. It is not a
 // general-purpose TOML parser and intentionally has no execution surface.
-func RepositoryVersion(root string) (string, error) {
+func LoadRepositoryPolicy(root string) (RepositoryPolicy, error) {
+	policy := DefaultRepositoryPolicy()
 	path := filepath.Join(root, ".zsh-git-inlay.toml")
 	content, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return "none", nil
+		return policy, nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("read repository config: %w", err)
+		return RepositoryPolicy{}, fmt.Errorf("read repository config: %w", err)
 	}
 	_, values, err := parse(string(content), map[string]bool{
-		"commit.convention":  true,
-		"commit.types":       true,
-		"commit.scopes":      true,
-		"commit.line_length": true,
+		"commit.convention":     true,
+		"commit.types":          true,
+		"commit.scopes":         true,
+		"commit.scope_paths":    true,
+		"commit.line_length":    true,
+		"commit.capitalization": true,
+		"commit.body":           true,
 	})
 	if err != nil {
-		return "", fmt.Errorf("invalid repository config %s: %w", path, err)
+		return RepositoryPolicy{}, fmt.Errorf("invalid repository config %s: %w", path, err)
 	}
-	for key, value := range values {
-		switch key {
-		case "commit.convention":
-			if !quoted(value) {
-				return "", fmt.Errorf("invalid repository config %s: commit.convention must be a string", path)
+	if value, ok := values["commit.convention"]; ok {
+		if !quoted(value) || unquote(value) != "conventional" {
+			return RepositoryPolicy{}, fmt.Errorf("invalid repository config %s: commit.convention must be conventional", path)
+		}
+		policy.Convention = unquote(value)
+	}
+	if value, ok := values["commit.types"]; ok {
+		items, itemErr := policyArray(value, "commit.types")
+		if itemErr != nil {
+			return RepositoryPolicy{}, fmt.Errorf("invalid repository config %s: %w", path, itemErr)
+		}
+		for _, item := range items {
+			if !policyName.MatchString(item) {
+				return RepositoryPolicy{}, fmt.Errorf("invalid repository config %s: commit.types contains an unsafe type", path)
 			}
-		case "commit.types", "commit.scopes":
-			if !stringArray(value) {
-				return "", fmt.Errorf("invalid repository config %s: %s must be a string array", path, key)
+		}
+		policy.Types = items
+	}
+	if value, ok := values["commit.scopes"]; ok {
+		items, itemErr := policyArray(value, "commit.scopes")
+		if itemErr != nil {
+			return RepositoryPolicy{}, fmt.Errorf("invalid repository config %s: %w", path, itemErr)
+		}
+		for _, item := range items {
+			if !policyName.MatchString(item) {
+				return RepositoryPolicy{}, fmt.Errorf("invalid repository config %s: commit.scopes contains an unsafe scope", path)
 			}
-		case "commit.line_length":
-			length, lengthErr := strconv.Atoi(value)
-			if lengthErr != nil || length < 1 || length > 200 {
-				return "", fmt.Errorf("invalid repository config %s: commit.line_length must be 1..200", path)
+		}
+		policy.Scopes = items
+	}
+	if value, ok := values["commit.scope_paths"]; ok {
+		items, itemErr := policyArray(value, "commit.scope_paths")
+		if itemErr != nil {
+			return RepositoryPolicy{}, fmt.Errorf("invalid repository config %s: %w", path, itemErr)
+		}
+		rules := make([]ScopeRule, 0, len(items))
+		for _, item := range items {
+			prefix, scope, found := strings.Cut(item, "=")
+			prefix = strings.TrimSuffix(strings.TrimSpace(filepath.ToSlash(prefix)), "/")
+			scope = strings.TrimSpace(scope)
+			if !found || prefix == "" || filepath.IsAbs(prefix) || strings.HasPrefix(prefix, "../") || strings.Contains(prefix, "/../") || strings.ContainsAny(prefix, "\\\x00") || !policyName.MatchString(scope) {
+				return RepositoryPolicy{}, fmt.Errorf("invalid repository config %s: commit.scope_paths entries must be relative-prefix=scope", path)
+			}
+			rules = append(rules, ScopeRule{Path: prefix, Scope: scope})
+		}
+		for _, rule := range rules {
+			if len(policy.Scopes) > 0 && !contains(policy.Scopes, rule.Scope) {
+				return RepositoryPolicy{}, fmt.Errorf("invalid repository config %s: commit.scope_paths scope must appear in commit.scopes", path)
+			}
+		}
+		sort.Slice(rules, func(left, right int) bool {
+			if len(rules[left].Path) == len(rules[right].Path) {
+				return rules[left].Path < rules[right].Path
+			}
+			return len(rules[left].Path) > len(rules[right].Path)
+		})
+		policy.ScopePaths = rules
+	}
+	if value, ok := values["commit.line_length"]; ok {
+		length, lengthErr := strconv.Atoi(value)
+		if lengthErr != nil || length < 16 || length > 160 {
+			return RepositoryPolicy{}, fmt.Errorf("invalid repository config %s: commit.line_length must be 16..160", path)
+		}
+		policy.LineLength = length
+	}
+	if value, ok := values["commit.capitalization"]; ok {
+		if !quoted(value) || (unquote(value) != "lower" && unquote(value) != "sentence") {
+			return RepositoryPolicy{}, fmt.Errorf("invalid repository config %s: commit.capitalization must be lower or sentence", path)
+		}
+		policy.Capitalization = unquote(value)
+	}
+	if value, ok := values["commit.body"]; ok {
+		if !quoted(value) || (unquote(value) != "forbid" && unquote(value) != "optional" && unquote(value) != "required") {
+			return RepositoryPolicy{}, fmt.Errorf("invalid repository config %s: commit.body must be forbid, optional, or required", path)
+		}
+		policy.Body = unquote(value)
+	}
+	sum := sha256.Sum256(content)
+	policy.Source, policy.Version = path, fmt.Sprintf("%x", sum[:])
+	return policy, nil
+}
+
+func RepositoryVersion(root string) (string, error) {
+	policy, err := LoadRepositoryPolicy(root)
+	if err != nil {
+		return "", err
+	}
+	return policy.Version, nil
+}
+
+func (policy RepositoryPolicy) AllowsType(value string) bool {
+	return len(policy.Types) == 0 || contains(policy.Types, value)
+}
+
+func (policy RepositoryPolicy) InferredScopes(paths []string) []string {
+	result := make([]string, 0, len(policy.ScopePaths))
+	seen := map[string]bool{}
+	for _, path := range paths {
+		path = strings.TrimPrefix(filepath.ToSlash(path), "./")
+		for _, rule := range policy.ScopePaths {
+			if path == rule.Path || strings.HasPrefix(path, rule.Path+"/") {
+				if !seen[rule.Scope] {
+					seen[rule.Scope] = true
+					result = append(result, rule.Scope)
+				}
+				break
 			}
 		}
 	}
-	sum := sha256.Sum256(content)
-	return fmt.Sprintf("%x", sum[:]), nil
+	sort.Strings(result)
+	return result
+}
+
+func contains(values []string, value string) bool {
+	for _, item := range values {
+		if item == value {
+			return true
+		}
+	}
+	return false
 }
 
 func parse(content string, allowed map[string]bool) (string, map[string]string, error) {
@@ -329,4 +461,25 @@ func stringArray(value string) bool {
 		}
 	}
 	return true
+}
+
+func policyArray(value, key string) ([]string, error) {
+	if !stringArray(value) {
+		return nil, fmt.Errorf("%s must be a string array", key)
+	}
+	content := strings.TrimSpace(value[1 : len(value)-1])
+	if content == "" {
+		return nil, nil
+	}
+	seen := map[string]bool{}
+	items := make([]string, 0, strings.Count(content, ",")+1)
+	for _, raw := range strings.Split(content, ",") {
+		item := unquote(strings.TrimSpace(raw))
+		if item == "" || len(item) > 80 || seen[item] {
+			return nil, fmt.Errorf("%s contains an empty, oversized, or duplicate item", key)
+		}
+		seen[item] = true
+		items = append(items, item)
+	}
+	return items, nil
 }

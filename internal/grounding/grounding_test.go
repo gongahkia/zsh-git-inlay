@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/gongahkia/zsh-git-inlay/internal/config"
 	"github.com/gongahkia/zsh-git-inlay/internal/gitstate"
 	"github.com/gongahkia/zsh-git-inlay/internal/provider"
 	"github.com/gongahkia/zsh-git-inlay/internal/repoctx"
@@ -18,7 +19,7 @@ func TestEvaluateRejectsUnsupportedClaimsAndRanksGroundedFirst(t *testing.T) {
 		{Type: "fix", Scope: "parser", Subject: "prevent payment timeout ABC-999", EvidenceIDs: []string{"change:99"}},
 		{Type: "test", Scope: "parser", Subject: "cover parser behavior ABC-123", EvidenceIDs: []string{"change:0"}},
 		{Type: "docs", Subject: "update parser guidance", EvidenceIDs: []string{"change:0"}},
-	}, compiled)
+	}, compiled, config.DefaultRepositoryPolicy())
 	if results[0].State != Ungrounded || len(results[0].UnsupportedClaims) < 2 {
 		t.Fatalf("adversarial candidate = %#v", results[0])
 	}
@@ -36,7 +37,7 @@ func TestEvaluateRejectsUnsupportedClaimsAndRanksGroundedFirst(t *testing.T) {
 
 func TestEvaluateMarksHeuristicFixPartialAndQuietFiltersIt(t *testing.T) {
 	compiled := groundedContext(t)
-	results := Evaluate([]provider.Candidate{{Type: "fix", Scope: "parser", Subject: "fix parser behavior", EvidenceIDs: []string{"change:0"}}}, compiled)
+	results := Evaluate([]provider.Candidate{{Type: "fix", Scope: "parser", Subject: "fix parser behavior", EvidenceIDs: []string{"change:0"}}}, compiled, config.DefaultRepositoryPolicy())
 	if results[0].State != PartiallyGrounded {
 		t.Fatalf("fix result = %#v", results[0])
 	}
@@ -45,6 +46,43 @@ func TestEvaluateMarksHeuristicFixPartialAndQuietFiltersIt(t *testing.T) {
 	}
 	if conservative := Rank(results, "conservative"); len(conservative) != 1 {
 		t.Fatalf("conservative omitted partial result: %v", conservative)
+	}
+}
+
+func TestEvaluateAppliesRepositoryTypeScopePathAndWordingPolicy(t *testing.T) {
+	compiled := groundedContext(t)
+	policy := config.RepositoryPolicy{
+		Convention:     "conventional",
+		Types:          []string{"test"},
+		Scopes:         []string{"parser"},
+		ScopePaths:     []config.ScopeRule{{Path: "internal/parser", Scope: "parser"}},
+		LineLength:     40,
+		Capitalization: "lower",
+		Body:           "optional",
+	}
+	results := Evaluate([]provider.Candidate{
+		{Type: "test", Scope: "parser", Subject: "cover parser tests", EvidenceIDs: []string{"change:0"}},
+		{Type: "docs", Scope: "parser", Subject: "cover parser tests", EvidenceIDs: []string{"change:0"}},
+		{Type: "test", Scope: "other", Subject: "cover parser tests", EvidenceIDs: []string{"change:0"}},
+		{Type: "test", Scope: "parser", Subject: "Cover parser tests", EvidenceIDs: []string{"change:0"}},
+	}, compiled, policy)
+	if results[0].State != Grounded {
+		t.Fatalf("policy-compliant candidate = %#v", results[0])
+	}
+	for _, result := range results[1:] {
+		if result.State != Ungrounded {
+			t.Fatalf("repository policy did not reject candidate: %#v", result)
+		}
+	}
+	requiredBody := policy
+	requiredBody.Body = "required"
+	if result := Evaluate([]provider.Candidate{{Type: "test", Scope: "parser", Subject: "cover parser tests", EvidenceIDs: []string{"change:0"}}}, compiled, requiredBody)[0]; result.State != Ungrounded {
+		t.Fatalf("required body policy did not reject subject-only candidate: %#v", result)
+	}
+	sentence := policy
+	sentence.Capitalization = "sentence"
+	if result := Evaluate([]provider.Candidate{{Type: "test", Scope: "parser", Subject: "Cover parser tests", EvidenceIDs: []string{"change:0"}}}, compiled, sentence)[0]; result.State != Grounded {
+		t.Fatalf("sentence capitalization policy was not applied: %#v", result)
 	}
 }
 

@@ -6,7 +6,9 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
 
+	"github.com/gongahkia/zsh-git-inlay/internal/config"
 	"github.com/gongahkia/zsh-git-inlay/internal/provider"
 	"github.com/gongahkia/zsh-git-inlay/internal/repoctx"
 )
@@ -52,12 +54,14 @@ var conventionalTypes = map[string]bool{
 
 // Evaluate applies deterministic structural checks first and reports heuristic
 // signals separately. It does not claim semantic proof of a behavioral change.
-func Evaluate(candidates []provider.Candidate, compiled repoctx.Compiled) []Result {
+func Evaluate(candidates []provider.Candidate, compiled repoctx.Compiled, policy config.RepositoryPolicy) []Result {
 	evidence := map[string]repoctx.Evidence{"metadata:staged": {ID: "metadata:staged"}}
 	components := map[string]bool{}
+	paths := make([]string, 0, len(compiled.Evidence()))
 	hasTestPath := false
 	for _, item := range compiled.Evidence() {
 		evidence[item.ID] = item
+		paths = append(paths, item.Path)
 		for _, component := range pathTerms(item.Path) {
 			components[component] = true
 		}
@@ -65,6 +69,7 @@ func Evaluate(candidates []provider.Candidate, compiled repoctx.Compiled) []Resu
 			hasTestPath = true
 		}
 	}
+	inferredScopes := policy.InferredScopes(paths)
 	issues := map[string]bool{}
 	for _, issue := range compiled.Issues() {
 		issues[issue] = true
@@ -75,12 +80,12 @@ func Evaluate(candidates []provider.Candidate, compiled repoctx.Compiled) []Resu
 	}
 	results := make([]Result, len(candidates))
 	for index, value := range candidates {
-		results[index] = evaluate(value, evidence, components, hasTestPath, issues, recentTypes)
+		results[index] = evaluate(value, evidence, components, hasTestPath, issues, recentTypes, inferredScopes, policy)
 	}
 	return results
 }
 
-func evaluate(value provider.Candidate, evidence map[string]repoctx.Evidence, components map[string]bool, hasTestPath bool, issues, recentTypes map[string]bool) Result {
+func evaluate(value provider.Candidate, evidence map[string]repoctx.Evidence, components map[string]bool, hasTestPath bool, issues, recentTypes map[string]bool, inferredScopes []string, policy config.RepositoryPolicy) Result {
 	result := Result{EvidenceIDs: append([]string(nil), value.EvidenceIDs...)}
 	validEvidence := 0
 	for _, id := range value.EvidenceIDs {
@@ -92,13 +97,13 @@ func evaluate(value provider.Candidate, evidence map[string]repoctx.Evidence, co
 			result.UnsupportedClaims = append(result.UnsupportedClaims, "unknown evidence reference")
 		}
 	}
-	typeValid := conventionalTypes[value.Type]
-	result.Checks = append(result.Checks, Check{Name: "commit_type", Deterministic: true, Passed: typeValid, Detail: "built-in Conventional Commit type allowlist"})
+	typeValid := conventionalTypes[value.Type] && policy.AllowsType(value.Type)
+	result.Checks = append(result.Checks, Check{Name: "commit_type", Deterministic: true, Passed: typeValid, Detail: "built-in security floor plus repository type policy"})
 	if !typeValid {
 		result.UnsupportedClaims = append(result.UnsupportedClaims, "unsupported commit type")
 	}
-	subjectValid := len(value.Subject) > 0 && len(value.Subject) <= 120 && !strings.ContainsAny(value.Subject, "\r\n")
-	result.Checks = append(result.Checks, Check{Name: "subject_format", Deterministic: true, Passed: subjectValid, Detail: "non-empty single-line subject within 120 bytes"})
+	subjectValid := len(value.Subject) > 0 && len(value.Subject) <= 120 && commitLength(value) <= policy.LineLength && !strings.ContainsAny(value.Subject, "\r\n")
+	result.Checks = append(result.Checks, Check{Name: "subject_format", Deterministic: true, Passed: subjectValid, Detail: "non-empty single-line subject within effective repository line length"})
 	if !subjectValid {
 		result.UnsupportedClaims = append(result.UnsupportedClaims, "invalid subject")
 	}
@@ -106,11 +111,21 @@ func evaluate(value provider.Candidate, evidence map[string]repoctx.Evidence, co
 	componentMatch := subjectMatchesComponent(value.Subject, components)
 	scopeValid := true
 	if value.Scope != "" {
-		scopeValid = scopeMatchesComponent(value.Scope, components)
-		result.Checks = append(result.Checks, Check{Name: "allowed_scope", Deterministic: true, Passed: scopeValid, Detail: "scope must be repo or name a changed path component"})
+		scopeValid = scopeAllowed(value.Scope, components, inferredScopes, policy)
+		result.Checks = append(result.Checks, Check{Name: "allowed_scope", Deterministic: true, Passed: scopeValid, Detail: "built-in scope relevance plus repository scope/path policy"})
 		if !scopeValid {
 			result.UnsupportedClaims = append(result.UnsupportedClaims, "unsupported scope")
 		}
+	}
+	capitalized := capitalizationValid(value.Subject, policy.Capitalization)
+	result.Checks = append(result.Checks, Check{Name: "capitalization", Deterministic: true, Passed: capitalized, Detail: "effective repository capitalization policy"})
+	if !capitalized {
+		result.UnsupportedClaims = append(result.UnsupportedClaims, "capitalization policy mismatch")
+	}
+	bodyValid := policy.Body != "required"
+	result.Checks = append(result.Checks, Check{Name: "body_preference", Deterministic: true, Passed: bodyValid, Detail: "subject-only candidates cannot satisfy a required body"})
+	if !bodyValid {
+		result.UnsupportedClaims = append(result.UnsupportedClaims, "required commit body is unavailable")
 	}
 	for _, issue := range issuePattern.FindAllString(strings.ToUpper(value.Subject), -1) {
 		found := issues[issue]
@@ -149,7 +164,7 @@ func evaluate(value provider.Candidate, evidence map[string]repoctx.Evidence, co
 			heuristics++
 		}
 	}
-	result.Score = validEvidence*30 + boolScore(typeValid, 20) + boolScore(subjectValid, 20) + boolScore(scopeValid, 10) + boolScore(componentMatch, 10) + boolScore(styleMatch, 5) - len(result.UnsupportedClaims)*35
+	result.Score = validEvidence*30 + boolScore(typeValid, 20) + boolScore(subjectValid, 20) + boolScore(scopeValid, 10) + boolScore(capitalized, 10) + boolScore(bodyValid, 5) + boolScore(componentMatch, 10) + boolScore(styleMatch, 5) - len(result.UnsupportedClaims)*35
 	switch {
 	case len(result.UnsupportedClaims) > 0 || !typeValid || !subjectValid:
 		result.State = Ungrounded
@@ -259,6 +274,46 @@ func scopeMatchesComponent(scope string, components map[string]bool) bool {
 		if components[word] {
 			return true
 		}
+	}
+	return false
+}
+
+func scopeAllowed(scope string, components map[string]bool, inferred []string, policy config.RepositoryPolicy) bool {
+	if len(policy.Scopes) > 0 && !stringContains(policy.Scopes, scope) {
+		return false
+	}
+	if len(inferred) > 0 {
+		return stringContains(inferred, scope)
+	}
+	return scopeMatchesComponent(scope, components)
+}
+
+func stringContains(values []string, value string) bool {
+	for _, item := range values {
+		if item == value {
+			return true
+		}
+	}
+	return false
+}
+
+func commitLength(value provider.Candidate) int {
+	length := len(value.Type) + 2 + len(value.Subject)
+	if value.Scope != "" {
+		length += len(value.Scope) + 2
+	}
+	return length
+}
+
+func capitalizationValid(subject, policy string) bool {
+	for _, character := range subject {
+		if !unicode.IsLetter(character) {
+			continue
+		}
+		if policy == "sentence" {
+			return unicode.IsUpper(character)
+		}
+		return unicode.IsLower(character)
 	}
 	return false
 }

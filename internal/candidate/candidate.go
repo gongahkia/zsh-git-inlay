@@ -187,7 +187,7 @@ func safe(value string) bool {
 		return false
 	}
 	for _, character := range value {
-		if !(unicode.IsLower(character) || unicode.IsDigit(character) || strings.ContainsRune(" ():-_./", character)) {
+		if !(unicode.IsLetter(character) || unicode.IsDigit(character) || strings.ContainsRune(" ():-_./", character)) {
 			return false
 		}
 	}

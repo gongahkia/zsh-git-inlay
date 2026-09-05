@@ -31,7 +31,10 @@ The following are product decisions, not implemented features in this milestone:
   candidates before normal rendering. It distinguishes deterministic checks from
   heuristic fix/behavior signals and intentionally does not promise semantic
   verification.
-- Repository configuration controls message convention and scopes only. It must never configure provider access, credentials, activity capture, output capture, or executable behavior.
+- Repository configuration controls declarative message convention, types,
+  scopes, path inference, length, capitalization, and body preference only. It
+  must never configure provider access, credentials, activity capture, output
+  capture, or executable behavior.
 - Normal flow continues to show one suggestion with cycling. Ambiguity defaults to a conservative factual message; users may choose conservative, quiet, visible, or hintable ambiguity behavior.
 - Local preference learning will be enabled by default and scoped per repository. It will adapt ranking and style rather than fine-tune a model. Matching clones will ask before sharing learned preferences.
 - Neovim is the only planned V1 context adapter. It remains an event producer, never a suggestion frontend or independent inference caller.

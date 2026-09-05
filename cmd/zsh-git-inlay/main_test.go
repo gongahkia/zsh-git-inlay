@@ -77,7 +77,7 @@ func TestExplainCommandReportsGroundingForPreparedCandidate(t *testing.T) {
 		if err == nil {
 			var report map[string]any
 			if json.Unmarshal([]byte(output), &report) == nil {
-				if candidates, ok := report["candidates"].([]any); ok && len(candidates) > 0 {
+				if candidates, ok := report["candidates"].([]any); ok && len(candidates) > 0 && report["policy"] != nil {
 					return
 				}
 			}

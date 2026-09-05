@@ -23,7 +23,8 @@ const (
 	// repository context.
 	ContextVersion   = "v1"
 	GroundingVersion = "v1"
-	GeneratorVersion = "v1-provider-" + config.ProviderPromptVersion + "-context-" + ContextVersion + "-grounding-" + GroundingVersion
+	PolicyVersion    = "v1"
+	GeneratorVersion = "v1-provider-" + config.ProviderPromptVersion + "-context-" + ContextVersion + "-grounding-" + GroundingVersion + "-policy-" + PolicyVersion
 )
 
 const maxIndexBytes = 64 * 1024 * 1024

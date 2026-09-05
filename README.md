@@ -68,7 +68,12 @@ cycle_keybinding = "^Xg"
 verbose = false
 ```
 
-Values are schema-validated; unknown keys are rejected. A repository may optionally contain `.zsh-git-inlay.toml` with only `[commit]` `convention`, `types`, `scopes`, and `line_length` keys. Its content influences the fingerprint, but it never executes and cannot configure a provider, activity collection, credentials, permissions, or command hooks.
+Values are schema-validated; unknown keys are rejected. A repository may
+optionally contain `.zsh-git-inlay.toml` with declarative `[commit]`
+convention, type/scope, scope-path, length, capitalization, and body-preference
+fields. Its content influences the fingerprint, but it never executes and
+cannot configure a provider, activity collection, credentials, permissions, or
+command hooks. See [repository policy](docs/POLICY.md).
 
 Candidate storage is bounded by `cache.max_records`, `cache.max_bytes`, and
 `cache.max_age`. The defaults retain at most 512 candidate records, 32 MiB, and

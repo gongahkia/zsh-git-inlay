@@ -53,22 +53,26 @@ func TestLoadRejectsUnsafeProviderConfiguration(t *testing.T) {
 func TestRepositoryConfigRejectsCapabilities(t *testing.T) {
 	repository := t.TempDir()
 	path := filepath.Join(repository, ".zsh-git-inlay.toml")
-	if err := os.WriteFile(path, []byte("[commit]\nconvention = \"conventional\"\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("[commit]\nconvention = \"conventional\"\ntypes = [\"feat\", \"fix\"]\nscopes = [\"api\", \"cli\"]\nscope_paths = [\"internal/api=api\", \"cmd=cli\"]\nline_length = 72\ncapitalization = \"sentence\"\nbody = \"optional\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if version, err := RepositoryVersion(repository); err != nil || version == "none" {
-		t.Fatalf("version = %q, err = %v", version, err)
+	policy, err := LoadRepositoryPolicy(repository)
+	if err != nil || policy.Version == "none" || policy.Convention != "conventional" || policy.LineLength != 72 || policy.Capitalization != "sentence" || len(policy.Types) != 2 || len(policy.Scopes) != 2 || len(policy.ScopePaths) != 2 {
+		t.Fatalf("policy = %#v, err = %v", policy, err)
 	}
-	if err := os.WriteFile(path, []byte("[provider]\nendpoint = \"https://example.invalid\"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := RepositoryVersion(repository); err == nil {
-		t.Fatal("provider capability was accepted")
-	}
-	if err := os.WriteFile(path, []byte("[commit]\ntypes = 3\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := RepositoryVersion(repository); err == nil {
-		t.Fatal("invalid repository schema was accepted")
+	for _, content := range []string{
+		"[provider]\nendpoint = \"https://example.invalid\"\n",
+		"[permissions]\nactivity = true\n",
+		"[commit]\ntypes = 3\n",
+		"[commit]\nscope_paths = [\"../secret=api\"]\n",
+		"[commit]\nscopes = [\"api\"]\nscope_paths = [\"cmd=cli\"]\n",
+		"[commit]\ncapitalization = \"run this\"\n",
+	} {
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadRepositoryPolicy(repository); err == nil {
+			t.Fatalf("unsafe repository config accepted: %q", content)
+		}
 	}
 }

@@ -110,6 +110,14 @@ func TestOllamaHonorsCancellation(t *testing.T) {
 	}
 }
 
+func TestStructuredCandidateAllowsSafeSentenceCapitalization(t *testing.T) {
+	response := Response{Candidates: []Candidate{{Type: "docs", Scope: "repo", Subject: "Update staged documentation", EvidenceIDs: []string{"change:0"}}}}
+	values, err := response.ToCandidates()
+	if err != nil || len(values) != 1 || values[0].Message != "docs(repo): Update staged documentation" {
+		t.Fatalf("sentence-capitalized candidate = %#v err=%v", values, err)
+	}
+}
+
 func providerRepository(t *testing.T) string {
 	t.Helper()
 	repository := t.TempDir()

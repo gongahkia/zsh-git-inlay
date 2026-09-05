@@ -26,14 +26,15 @@ import (
 )
 
 type Record struct {
-	Fingerprint        string                `json:"fingerprint"`
-	Repository         string                `json:"repository_id"`
-	Worktree           string                `json:"worktree_id"`
-	ContextFingerprint string                `json:"context_fingerprint"`
-	Candidates         []candidate.Candidate `json:"candidates"`
-	CreatedAt          time.Time             `json:"created_at"`
-	Provider           provider.Metadata     `json:"provider"`
-	Grounding          []grounding.Result    `json:"grounding,omitempty"`
+	Fingerprint        string                  `json:"fingerprint"`
+	Repository         string                  `json:"repository_id"`
+	Worktree           string                  `json:"worktree_id"`
+	ContextFingerprint string                  `json:"context_fingerprint"`
+	Candidates         []candidate.Candidate   `json:"candidates"`
+	CreatedAt          time.Time               `json:"created_at"`
+	Provider           provider.Metadata       `json:"provider"`
+	Policy             config.RepositoryPolicy `json:"policy"`
+	Grounding          []grounding.Result      `json:"grounding,omitempty"`
 }
 
 type Status struct {
@@ -265,10 +266,15 @@ func (server *Server) generate(ctx context.Context, expected gitstate.State, cwd
 		server.finish(expected.Fingerprint, jobID)
 		return
 	}
+	repositoryPolicy, policyErr := config.LoadRepositoryPolicy(expected.Root)
+	if policyErr != nil {
+		server.finish(expected.Fingerprint, jobID)
+		return
+	}
 	generated, err := server.generateCandidates(ctx, cwd, compiled)
 	if err == nil && ctx.Err() == nil {
 		policy := server.policy()
-		candidates, reports, rankErr := rankCandidates(generated, compiled, policy)
+		candidates, reports, rankErr := rankCandidates(generated, compiled, policy, repositoryPolicy)
 		if rankErr != nil {
 			server.finish(expected.Fingerprint, jobID)
 			return
@@ -276,7 +282,7 @@ func (server *Server) generate(ctx context.Context, expected gitstate.State, cwd
 		if len(candidates) == 0 && (policy == "conservative" || policy == "hintable") {
 			if fallback, fallbackErr := server.generateFallback(ctx, cwd, compiled, generated.Metadata.Name); fallbackErr == nil {
 				generated = fallback
-				candidates, reports, rankErr = rankCandidates(generated, compiled, policy)
+				candidates, reports, rankErr = rankCandidates(generated, compiled, policy, repositoryPolicy)
 			}
 		}
 		if rankErr != nil || len(candidates) == 0 {
@@ -287,7 +293,7 @@ func (server *Server) generate(ctx context.Context, expected gitstate.State, cwd
 		current, checkErr := gitstate.Snapshot(checkContext, cwd)
 		cancel()
 		if checkErr == nil && current.Availability == gitstate.Ready && current.Fingerprint == expected.Fingerprint {
-			record := Record{Fingerprint: expected.Fingerprint, Repository: expected.RepoID, Worktree: expected.WorktreeID, ContextFingerprint: expected.ContextFingerprint, Candidates: candidates, CreatedAt: time.Now().UTC(), Provider: generated.Metadata, Grounding: reports}
+			record := Record{Fingerprint: expected.Fingerprint, Repository: expected.RepoID, Worktree: expected.WorktreeID, ContextFingerprint: expected.ContextFingerprint, Candidates: candidates, CreatedAt: time.Now().UTC(), Provider: generated.Metadata, Policy: repositoryPolicy, Grounding: reports}
 			if server.store(record) == nil {
 				finalContext, finalCancel := gitstate.WithTimeout()
 				final, finalErr := gitstate.Snapshot(finalContext, cwd)
@@ -303,12 +309,12 @@ func (server *Server) generate(ctx context.Context, expected gitstate.State, cwd
 	server.finish(expected.Fingerprint, jobID)
 }
 
-func rankCandidates(response provider.Response, compiled repoctx.Compiled, policy string) ([]candidate.Candidate, []grounding.Result, error) {
+func rankCandidates(response provider.Response, compiled repoctx.Compiled, policy string, repositoryPolicy config.RepositoryPolicy) ([]candidate.Candidate, []grounding.Result, error) {
 	values, err := response.ToCandidates()
 	if err != nil {
 		return nil, nil, err
 	}
-	reports := grounding.Evaluate(response.Candidates, compiled)
+	reports := grounding.Evaluate(response.Candidates, compiled, repositoryPolicy)
 	order := grounding.Rank(reports, policy)
 	rankedValues := make([]candidate.Candidate, 0, len(order))
 	rankedReports := make([]grounding.Result, 0, len(order))

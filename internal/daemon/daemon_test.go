@@ -122,7 +122,7 @@ func TestRankingDemotesUnsupportedProviderClaims(t *testing.T) {
 		{Type: "fix", Scope: "payment", Subject: "prevent payment timeout xyz-999", EvidenceIDs: []string{"change:99"}},
 		{Type: "test", Scope: "repo", Subject: "cover staged parser tests", EvidenceIDs: []string{"change:0"}},
 	}}
-	values, reports, err := rankCandidates(response, compiled, "conservative")
+	values, reports, err := rankCandidates(response, compiled, "conservative", config.DefaultRepositoryPolicy())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -326,8 +326,9 @@ func explain(arguments []string) error {
 		values[index] = explanation{Message: candidate.Message, Grounding: record.Grounding[index]}
 	}
 	if *jsonOutput {
-		return printJSON(map[string]any{"fingerprint": record.Fingerprint, "provider": record.Provider, "candidates": values})
+		return printJSON(map[string]any{"fingerprint": record.Fingerprint, "provider": record.Provider, "policy": record.Policy, "candidates": values})
 	}
+	fmt.Printf("policy: %s (%s)\n", record.Policy.Source, record.Policy.Version)
 	for _, value := range values {
 		fmt.Printf("%s\n  %s score=%d\n", value.Message, value.Grounding.State, value.Grounding.Score)
 		for _, check := range value.Grounding.Checks {

@@ -193,3 +193,18 @@ must remain off the lookup path.
   deterministic generation 1.19 ms/op, and warm socket lookup 0.073 ms/op,
   all within the existing absolute budgets. Doctor again found no daemon or
   reachable Ollama; no live model request or download occurred.
+- 2026-09-05: completed Milestone 6's typed repository message policy. Strict
+  declarative configuration now supports conventional type/scope allowlists,
+  bounded relative path-to-scope inference, total line length, capitalization,
+  and body preference. Grounding applies policy beneath the built-in safety
+  floor and user-global privacy/provider controls; cache diagnostics expose the
+  effective policy and provenance through `explain`. Unknown, capability-
+  bearing, malformed, unsafe-path, duplicate, and inconsistent policy entries
+  are rejected without partial application. Required bodies intentionally
+  suppress subject-only suggestions until a future secondary compose flow can
+  satisfy them. Focused race tests plus `go test ./...`, `make test`, and
+  `make lint` passed. The benchmark recorded parser 0.462 µs/op, exact
+  snapshot 19.19 ms/op, deterministic generation 2.79 ms/op, and warm socket
+  lookup 0.145 ms/op, within the 1 ms/25 ms/0.25 ms absolute budgets. Doctor
+  still found no running daemon or reachable Ollama; no model request or
+  download occurred.

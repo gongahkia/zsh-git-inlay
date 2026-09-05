@@ -69,6 +69,14 @@ an additional style ranking signal; future learned preferences are not yet an
 input. This work occurs before publication; it adds no operation to the
 strategy or warm lookup path.
 
+Repository policy is loaded as strict declarative data before grounding. It can
+restrict message types/scopes, infer scopes from bounded changed paths, apply
+line length and capitalization rules, and state a body preference. It cannot
+grant a provider or privacy capability. Its validated content is already part
+of the staged fingerprint; the published record retains the effective policy
+for diagnostics. [POLICY.md](POLICY.md) documents the fixed security and
+configuration precedence.
+
 ## Prototype provider and parser
 
 The deterministic provider invokes `git diff --cached --name-status -z
