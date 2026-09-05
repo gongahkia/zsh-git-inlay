@@ -140,9 +140,28 @@ func Suggestion(buffer string, cursor int, candidates []candidate.Candidate, cyc
 	if cycle < 0 {
 		cycle = 0
 	}
-	chosen := candidates[cycle%len(candidates)].Message
-	if !strings.HasPrefix(chosen, message.Prefix) {
+	matching := 0
+	for _, value := range candidates {
+		if strings.HasPrefix(value.Message, message.Prefix) {
+			matching++
+		}
+	}
+	if matching == 0 {
 		return "", false
+	}
+	// Prefix-conditioned reranking keeps the established candidate order but
+	// promotes the first matching prepared candidate. It never asks the daemon
+	// to generate from an autosuggestion lookup.
+	remaining := cycle % matching
+	chosen := ""
+	for _, value := range candidates {
+		if strings.HasPrefix(value.Message, message.Prefix) {
+			if remaining == 0 {
+				chosen = value.Message
+				break
+			}
+			remaining--
+		}
 	}
 	rest := strings.TrimPrefix(chosen, message.Prefix)
 	switch message.Quote {

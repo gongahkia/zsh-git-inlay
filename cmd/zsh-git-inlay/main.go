@@ -18,6 +18,7 @@ import (
 	"github.com/gongahkia/zsh-git-inlay/internal/activity"
 	"github.com/gongahkia/zsh-git-inlay/internal/cloud"
 	"github.com/gongahkia/zsh-git-inlay/internal/command"
+	"github.com/gongahkia/zsh-git-inlay/internal/compose"
 	"github.com/gongahkia/zsh-git-inlay/internal/config"
 	"github.com/gongahkia/zsh-git-inlay/internal/daemon"
 	"github.com/gongahkia/zsh-git-inlay/internal/evaluation"
@@ -69,6 +70,8 @@ func run(arguments []string) error {
 		return permissionsCommand(arguments[1:])
 	case "cloud":
 		return cloudCommand(arguments[1:])
+	case "compose":
+		return composeCommand(arguments[1:])
 	case "activity":
 		return activityCommand(arguments[1:])
 	case "learning":
@@ -81,7 +84,7 @@ func run(arguments []string) error {
 }
 
 func usage() error {
-	return errors.New("usage: zsh-git-inlay {doctor|config|status|fingerprint|context|observe|suggest|candidates|explain|evaluate|model|permissions|cloud|activity|learning|daemon serve|daemon stop}")
+	return errors.New("usage: zsh-git-inlay {doctor|config|status|fingerprint|context|observe|suggest|candidates|explain|evaluate|model|permissions|cloud|compose|activity|learning|daemon serve|daemon stop}")
 }
 
 func commonFlags(name string) (*flag.FlagSet, *string, *bool) {
@@ -226,6 +229,9 @@ func suggest(arguments []string) error {
 	var record daemon.Record
 	if json.Unmarshal(reply.Payload, &record) != nil {
 		return suggestStatus(*jsonOutput, "malformed")
+	}
+	if record.Policy.Body == "required" {
+		return suggestStatus(*jsonOutput, "body_required")
 	}
 	suggestion, ok := command.Suggestion(*buffer, len(*buffer), record.Candidates, *cycle)
 	if ok && !*jsonOutput {
@@ -521,6 +527,108 @@ func cloudCommand(arguments []string) error {
 	default:
 		return errors.New("usage: zsh-git-inlay cloud {status|preview|grant|revoke}")
 	}
+}
+
+// compose is a secondary editor workflow. It only writes a user-owned message
+// file and never invokes git commit or changes the index.
+func composeCommand(arguments []string) error {
+	flags, cwdFlag, jsonOutput := commonFlags("compose")
+	candidateIndex := flags.Int("candidate", 0, "prepared candidate index")
+	if err := flags.Parse(arguments); err != nil || flags.NArg() != 0 || *candidateIndex < 0 {
+		return errors.New("usage: zsh-git-inlay compose [--cwd <directory>] [--candidate <index>] [--json]")
+	}
+	cwd, err := resolveCWD(*cwdFlag)
+	if err != nil {
+		return err
+	}
+	snapshotContext, cancel := gitstate.WithTimeout()
+	state, err := gitstate.Snapshot(snapshotContext, cwd)
+	cancel()
+	if err != nil {
+		return err
+	}
+	if state.Availability != gitstate.Ready {
+		return fmt.Errorf("%s: %s", state.Availability, state.Reason)
+	}
+	reply, err := call(ipc.Request{Version: ipc.Version, Operation: "lookup", Fingerprint: state.Fingerprint, Repository: state.RepoID, Worktree: state.WorktreeID}, 100*time.Millisecond)
+	if err != nil {
+		return fmt.Errorf("compose requires prepared candidates: %w", err)
+	}
+	if reply.Status != "ready" {
+		return fmt.Errorf("compose requires prepared candidates: %s", reply.Status)
+	}
+	var record daemon.Record
+	if err := json.Unmarshal(reply.Payload, &record); err != nil {
+		return fmt.Errorf("decode compose candidates: %w", err)
+	}
+	if record.Fingerprint != state.Fingerprint || *candidateIndex >= len(record.Candidates) || len(record.Grounding) != len(record.Candidates) {
+		return errors.New("compose candidate record is unavailable")
+	}
+	if !grounding.EligibleForBodyComposition(record.Grounding[*candidateIndex]) {
+		return errors.New("compose requires a grounded prepared candidate")
+	}
+	compiled, err := repoctx.Compile(context.Background(), cwd, state, record.Provider.Name)
+	if err != nil {
+		return err
+	}
+	plan, err := compose.Propose(record.Candidates[*candidateIndex].Message, compiled.Evidence(), record.Policy)
+	if err != nil {
+		return err
+	}
+	editor, err := compose.GitEditor(context.Background())
+	if err != nil {
+		return err
+	}
+	file, err := os.CreateTemp("", "zsh-git-inlay-compose-")
+	if err != nil {
+		return err
+	}
+	path := file.Name()
+	keep := false
+	defer func() {
+		if !keep {
+			_ = os.Remove(path)
+		}
+	}()
+	if err := file.Chmod(0o600); err == nil {
+		_, err = file.WriteString(plan.Message())
+	}
+	if err == nil {
+		err = file.Sync()
+	}
+	if closeErr := file.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	if err := editor.Run(context.Background(), path); err != nil {
+		keep = true
+		return fmt.Errorf("compose editor failed; edited message remains at %s", path)
+	}
+	edited, err := compose.ReadMessage(path)
+	if err != nil {
+		keep = true
+		return fmt.Errorf("compose could not read the edited message; it remains at %s", path)
+	}
+	verifyContext, verifyCancel := gitstate.WithTimeout()
+	current, snapshotErr := gitstate.Snapshot(verifyContext, cwd)
+	verifyCancel()
+	if snapshotErr != nil || current.Availability != gitstate.Ready || current.Fingerprint != state.Fingerprint {
+		keep = true
+		return fmt.Errorf("staged state changed during compose; edited message was not used and remains at %s", path)
+	}
+	if err := compose.ValidateEdited(edited, record.Policy); err != nil {
+		keep = true
+		return fmt.Errorf("edited message does not satisfy repository policy; it remains at %s", path)
+	}
+	keep = true
+	report := map[string]any{"fingerprint": state.Fingerprint, "candidate": record.Candidates[*candidateIndex].Message, "output_path": path, "proposed_body_grounding": plan.Grounding, "user_edited": edited != plan.Message(), "committed": false}
+	if *jsonOutput {
+		return printJSON(report)
+	}
+	fmt.Printf("composition verified; no commit was created\nmessage_file: %s\n", path)
+	return nil
 }
 
 func cloudStore() (*cloud.Store, error) {

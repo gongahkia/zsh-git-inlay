@@ -128,13 +128,21 @@ content. A grant is a complete provider-specific replacement and requires
 `--confirm`; revocation immediately makes cloud-derived cache records
 unavailable. See [the cloud grant guide](docs/CLOUD.md).
 
+`zsh-git-inlay compose` is a secondary, explicit editor workflow for an
+already prepared candidate that passed subject/evidence checks. It produces a
+private message file with a grounded staged-path body, rechecks the exact
+staged state after editing, and never stages or commits. Normal ghost-text
+suggestions remain subject-only; a required-body candidate is held for compose
+instead of rendered. See [the compose guide](docs/COMPOSE.md).
+
 The runtime socket defaults to `$XDG_RUNTIME_DIR/zsh-git-inlay/daemon.sock`; when that is unavailable, it uses a private XDG cache fallback. `ZSH_GIT_INLAY_RUNTIME_DIR` and `ZSH_GIT_INLAY_CACHE_DIR` are test and troubleshooting overrides.
 
 ## Diagnostics and development
 
 `fingerprint`, `context`, `status`, `candidates`, `explain`, `permissions`,
-`cloud`, `activity`, `learning`, and `daemon stop` are administrative commands, not alternate
-commit-message workflows:
+`cloud`, `activity`, `learning`, and `daemon stop` are administrative commands,
+not alternate commit-message workflows. `compose` is the separate explicit
+secondary editor workflow described above:
 
 ```zsh
 zsh-git-inlay fingerprint --cwd .
@@ -145,6 +153,7 @@ zsh-git-inlay candidates --cwd .
 zsh-git-inlay explain --cwd . --json
 zsh-git-inlay permissions
 zsh-git-inlay cloud preview --provider openai --cwd . --json
+zsh-git-inlay compose --cwd . --candidate 0 --json
 zsh-git-inlay activity inspect --cwd . --json
 zsh-git-inlay learning inspect --cwd . --json
 zsh-git-inlay suggest --cwd . --buffer 'git commit -m ' --json
@@ -181,4 +190,4 @@ rm "$HOME/.local/bin/zsh-git-inlay"
 
 Optional cached candidates are under `$XDG_CACHE_HOME/zsh-git-inlay` (or `~/.cache/zsh-git-inlay`). Removing that directory is recoverable only from backups; it contains no repository content, only candidate metadata records.
 
-Further design, security, and roadmap details are in [PRODUCT.md](docs/PRODUCT.md), [ARCHITECTURE.md](docs/ARCHITECTURE.md), [ACTIVITY.md](docs/ACTIVITY.md), [CLOUD.md](docs/CLOUD.md), [LEARNING.md](docs/LEARNING.md), [NEOVIM.md](docs/NEOVIM.md), and [THREAT-MODEL.md](docs/THREAT-MODEL.md).
+Further design, security, and roadmap details are in [PRODUCT.md](docs/PRODUCT.md), [ARCHITECTURE.md](docs/ARCHITECTURE.md), [ACTIVITY.md](docs/ACTIVITY.md), [CLOUD.md](docs/CLOUD.md), [COMPOSE.md](docs/COMPOSE.md), [LEARNING.md](docs/LEARNING.md), [NEOVIM.md](docs/NEOVIM.md), and [THREAT-MODEL.md](docs/THREAT-MODEL.md).

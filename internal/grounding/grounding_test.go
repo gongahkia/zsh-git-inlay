@@ -76,8 +76,11 @@ func TestEvaluateAppliesRepositoryTypeScopePathAndWordingPolicy(t *testing.T) {
 	}
 	requiredBody := policy
 	requiredBody.Body = "required"
-	if result := Evaluate([]provider.Candidate{{Type: "test", Scope: "parser", Subject: "cover parser tests", EvidenceIDs: []string{"change:0"}}}, compiled, requiredBody)[0]; result.State != Ungrounded {
-		t.Fatalf("required body policy did not reject subject-only candidate: %#v", result)
+	if result := Evaluate([]provider.Candidate{{Type: "test", Scope: "parser", Subject: "cover parser tests", EvidenceIDs: []string{"change:0"}}}, compiled, requiredBody)[0]; result.State != Ungrounded || !EligibleForBodyComposition(result) {
+		t.Fatalf("required body policy did not retain a safe compose input: %#v", result)
+	}
+	if EligibleForBodyComposition(results[1]) {
+		t.Fatalf("type-invalid candidate was accepted for composition: %#v", results[1])
 	}
 	sentence := policy
 	sentence.Capitalization = "sentence"

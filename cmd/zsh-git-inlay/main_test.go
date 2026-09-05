@@ -159,6 +159,109 @@ func TestCloudCommandsRequireConfirmationPreviewOnlyGrantedCategoriesAndPersistN
 	}
 }
 
+func TestComposeEditsGroundedBodyWithoutCommitting(t *testing.T) {
+	repository := learningRepository(t)
+	if err := os.WriteFile(filepath.Join(repository, "parser_test.go"), []byte("package parser\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	commandGit(t, repository, "add", "parser_test.go")
+	stop := startComposeDaemon(t, repository)
+	defer stop()
+	editor := filepath.Join(t.TempDir(), "editor")
+	if err := os.WriteFile(editor, []byte("#!/bin/sh\nprintf '\\nUser-authored rationale.\\n' >> \"$1\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_EDITOR", editor)
+	before := composeHead(t, repository)
+	output, err := captureCommandOutput(func() error { return run([]string{"compose", "--cwd", repository, "--json"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	var report map[string]any
+	if err := json.Unmarshal([]byte(output), &report); err != nil {
+		t.Fatalf("compose output=%q err=%v", output, err)
+	}
+	path, _ := report["output_path"].(string)
+	if path == "" || report["committed"] != false || report["user_edited"] != true {
+		t.Fatalf("compose report=%#v", report)
+	}
+	defer os.Remove(path)
+	info, statErr := os.Stat(path)
+	content, readErr := os.ReadFile(path)
+	if statErr != nil || readErr != nil || info.Mode().Perm() != 0o600 || !strings.Contains(string(content), "Staged paths:") || !strings.Contains(string(content), "User-authored rationale.") {
+		t.Fatalf("compose file info=%v stat=%v content=%q read=%v", info, statErr, content, readErr)
+	}
+	if after := composeHead(t, repository); after != before {
+		t.Fatalf("compose created a commit: before=%s after=%s", before, after)
+	}
+}
+
+func TestComposeRejectsStagedStateChangedInEditor(t *testing.T) {
+	repository := learningRepository(t)
+	if err := os.WriteFile(filepath.Join(repository, "parser_test.go"), []byte("package parser\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	commandGit(t, repository, "add", "parser_test.go")
+	stop := startComposeDaemon(t, repository)
+	defer stop()
+	editor := filepath.Join(t.TempDir(), "editor")
+	if err := os.WriteFile(editor, []byte("#!/bin/sh\nprintf 'stale\\n' > \"$COMPOSE_REPOSITORY/stale.go\"\ngit -C \"$COMPOSE_REPOSITORY\" add stale.go\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_EDITOR", editor)
+	t.Setenv("COMPOSE_REPOSITORY", repository)
+	before := composeHead(t, repository)
+	err := run([]string{"compose", "--cwd", repository, "--json"})
+	if err == nil || !strings.Contains(err.Error(), "staged state changed during compose") {
+		t.Fatalf("stale compose err=%v", err)
+	}
+	if marker := "remains at "; strings.Contains(err.Error(), marker) {
+		defer os.Remove(strings.TrimSpace(strings.TrimPrefix(err.Error(), "staged state changed during compose; edited message was not used and remains at ")))
+	}
+	if after := composeHead(t, repository); after != before {
+		t.Fatalf("stale compose created a commit: before=%s after=%s", before, after)
+	}
+}
+
+func TestComposeSuppliesRequiredBodyWithoutNormalSuggestion(t *testing.T) {
+	repository := learningRepository(t)
+	if err := os.WriteFile(filepath.Join(repository, ".zsh-git-inlay.toml"), []byte("[commit]\nbody = \"required\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repository, "parser_test.go"), []byte("package parser\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	commandGit(t, repository, "add", "parser_test.go")
+	stop := startComposeDaemon(t, repository)
+	defer stop()
+	output, err := captureCommandOutput(func() error {
+		return run([]string{"suggest", "--cwd", repository, "--buffer", "git commit -m ", "--json", "--no-start"})
+	})
+	var suggestion map[string]string
+	if json.Unmarshal([]byte(output), &suggestion) != nil || err != nil || suggestion["status"] != "body_required" {
+		t.Fatalf("required-body suggestion output=%q err=%v", output, err)
+	}
+	editor := filepath.Join(t.TempDir(), "editor")
+	if err := os.WriteFile(editor, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_EDITOR", editor)
+	output, err = captureCommandOutput(func() error { return run([]string{"compose", "--cwd", repository, "--json"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	var report map[string]any
+	if err := json.Unmarshal([]byte(output), &report); err != nil {
+		t.Fatalf("compose output=%q err=%v", output, err)
+	}
+	path, _ := report["output_path"].(string)
+	defer os.Remove(path)
+	content, readErr := os.ReadFile(path)
+	if path == "" || readErr != nil || !strings.Contains(string(content), "Staged paths:") || report["committed"] != false {
+		t.Fatalf("required-body compose report=%#v content=%q err=%v", report, content, readErr)
+	}
+}
+
 func TestActivityEmitCommandUsesConsentAndRedactsProducerData(t *testing.T) {
 	repository := t.TempDir()
 	runtimeDirectory, cacheDirectory, dataDirectory := filepath.Join(t.TempDir(), "runtime"), filepath.Join(t.TempDir(), "cache"), filepath.Join(t.TempDir(), "data")
@@ -296,6 +399,47 @@ func learningRepository(t *testing.T) string {
 	commandGit(t, repository, "add", "file.txt")
 	commandGit(t, repository, "commit", "-qm", "chore(repo): establish base")
 	return repository
+}
+
+func startComposeDaemon(t *testing.T, repository string) func() {
+	t.Helper()
+	t.Setenv("ZSH_GIT_INLAY_RUNTIME_DIR", filepath.Join(t.TempDir(), "runtime"))
+	t.Setenv("ZSH_GIT_INLAY_CACHE_DIR", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("ZSH_GIT_INLAY_DATA_DIR", filepath.Join(t.TempDir(), "data"))
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	serverContext, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- daemon.Serve(serverContext, config.Default(), repository) }()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := captureCommandOutput(func() error { return run([]string{"candidates", "--cwd", repository, "--json"}) }); err == nil {
+			return func() {
+				cancel()
+				select {
+				case err := <-done:
+					if err != nil {
+						t.Error(err)
+					}
+				case <-time.After(time.Second):
+					t.Error("compose daemon did not stop")
+				}
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	t.Fatal("compose daemon did not prepare candidates")
+	return func() {}
+}
+
+func composeHead(t *testing.T, repository string) string {
+	t.Helper()
+	command := exec.Command("git", "-C", repository, "rev-parse", "HEAD")
+	output, err := command.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(output))
 }
 
 func captureCommandOutput(run func() error) (string, error) {

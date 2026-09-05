@@ -126,4 +126,17 @@ deterministic conventional-style messages. It deliberately ignores compiled
 source context and remains the test oracle. Ollama can instead receive the
 bounded context compiler output described in [CONTEXT.md](CONTEXT.md).
 
-The parser accepts only the stated canonical command forms, including `command git commit`, `-m`, `--message`, `-am`, flags before the message, repeated whitespace, and incomplete quote states. It rejects non-end cursors, `--amend`, `--fixup`, `--squash`, other Git commands, shell operators/substitutions, and completed message arguments. A candidate must extend the user prefix. Empty messages receive single quotes; open single or double quotes receive their matching closing quote; an unquoted typed prefix receives a shell-escaped continuation. Generated candidates are restricted to a conservative printable character set before this composition.
+The parser accepts only the stated canonical command forms, including `command git commit`, `-m`, `--message`, `-am`, flags before the message, repeated whitespace, and incomplete quote states. It rejects non-end cursors, `--amend`, `--fixup`, `--squash`, other Git commands, shell operators/substitutions, and completed message arguments. A candidate must extend the user prefix. Empty messages receive single quotes; open single or double quotes receive their matching closing quote; an unquoted typed prefix receives a shell-escaped continuation. Generated candidates are restricted to a conservative printable character set before this composition. When a typed prefix matches a later prepared candidate, selection reranks the existing matching subset in its original order; it has no daemon, context, generation, or questionnaire operation.
+
+`zsh-git-inlay compose` is outside the strategy path. It looks up one already
+prepared candidate by the current exact fingerprint: a normally grounded
+candidate, or one withheld solely because a required-body policy needs compose
+to complete it. The latter never reaches normal rendering. Compose creates an
+owner-only temporary message file and invokes only a resolved executable plus
+literal editor arguments—never a shell. Its generated body is a bounded,
+wrapped list of staged status/path evidence, with grounding retained only for
+that generated content. After the editor exits it reads only the same private
+regular file, snapshots the staged state again, and rejects a mismatch or
+policy-invalid result while retaining the file for the user. A successful
+compose command only reports that file path; it neither stages content nor
+invokes `git commit`. [COMPOSE.md](COMPOSE.md) gives the user-facing details.

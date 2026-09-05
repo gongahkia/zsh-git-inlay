@@ -198,6 +198,31 @@ func Rank(results []Result, policy string) []int {
 	return indexes
 }
 
+// EligibleForBodyComposition accepts the normal grounded states and the one
+// deliberately withheld subject-only state: a candidate whose only failed
+// check is the repository's required-body preference. The latter is never
+// eligible for normal rendering; compose must add its independently grounded
+// body before the user can use it.
+func EligibleForBodyComposition(result Result) bool {
+	if result.State == Grounded || result.State == PartiallyGrounded {
+		return true
+	}
+	if result.State != Ungrounded {
+		return false
+	}
+	missingRequiredBody := false
+	for _, check := range result.Checks {
+		if check.Name == "body_preference" {
+			missingRequiredBody = !check.Passed
+			continue
+		}
+		if !check.Passed && (check.Deterministic || check.Name != "repository_style") {
+			return false
+		}
+	}
+	return missingRequiredBody
+}
+
 func allowed(state State, policy string) bool {
 	switch policy {
 	case "quiet":

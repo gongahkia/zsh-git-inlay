@@ -38,6 +38,17 @@ func TestSuggestionQuotesAndConstrainedPrefixes(t *testing.T) {
 	if got, ok := Suggestion("git commit -m nope", len("git commit -m nope"), testCandidates, 0); ok || got != "" {
 		t.Fatalf("unmatched prefix suggested %q", got)
 	}
+	matching := []candidate.Candidate{
+		{Message: "chore(repo): update staged files", Rank: 0},
+		{Message: "fix(cache): invalidate stale entries", Rank: 1},
+		{Message: "fix(cache): refresh stale metadata", Rank: 2},
+	}
+	if got, ok := Suggestion("git commit -m 'fix(cache): ", len("git commit -m 'fix(cache): "), matching, 0); !ok || got != "git commit -m 'fix(cache): invalidate stale entries'" {
+		t.Fatalf("prefix rerank selected %q (ok=%v)", got, ok)
+	}
+	if got, ok := Suggestion("git commit -m 'fix(cache): ", len("git commit -m 'fix(cache): "), matching, 1); !ok || got != "git commit -m 'fix(cache): refresh stale metadata'" {
+		t.Fatalf("prefix rerank cycle selected %q (ok=%v)", got, ok)
+	}
 	if got, ok := Suggestion("git commit -m ", len("git commit -m "), testCandidates, 1); !ok || got == "" || got == "git commit -m 'fix(cache): invalidate stale entries'" {
 		t.Fatalf("cycle did not select another candidate: %q", got)
 	}

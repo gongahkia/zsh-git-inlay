@@ -6,8 +6,10 @@
 
 The Go executable's `doctor`, `status`, `fingerprint`, `context`, `candidates`,
 `observe`, `evaluate`, `permissions`, `cloud`, `activity`, `learning`, and `daemon` commands are
-setup, diagnostic, and test facilities only. `evaluate` is an offline
-administrative harness, not an alternative commit-message workflow. The
+setup, diagnostic, and test facilities only. `compose` is an explicit,
+secondary editor utility in the same product; it is not an interactive
+frontend or a commit executor. `evaluate` is an offline administrative harness,
+not an alternative commit-message workflow. The
 deterministic generator remains the default and test oracle. An explicitly
 selected existing local Ollama runtime can generate structured candidates from
 bounded staged-only context; it has mocked contract validation but no
@@ -49,7 +51,7 @@ The following are implemented or settled product decisions:
   scopes, path inference, length, capitalization, and body preference only. It
   must never configure provider access, credentials, activity capture, output
   capture, or executable behavior.
-- Normal flow continues to show one suggestion with cycling. Ambiguity defaults to a conservative factual message; users may choose conservative, quiet, visible, or hintable ambiguity behavior.
+- Normal flow continues to show one suggestion with cycling. Ambiguity defaults to a conservative factual message; users may choose conservative, quiet, visible, or hintable ambiguity behavior. In hintable mode, a typed message prefix reranks only matching already-prepared candidates in their existing safe order; it does not request generation, context compilation, daemon startup, or a question from ZLE.
 - Local preference learning is enabled by default and scoped per repository.
   It retains bounded aggregate style signals from completed local commits and
   reranks only candidates that have already passed policy and grounding. It
@@ -58,11 +60,17 @@ The following are implemented or settled product decisions:
 - Neovim is the sole V1 editor-context adapter. It is an opt-in event producer,
   never a suggestion frontend or independent inference caller; it emits bounded
   file and diagnostic-count transitions only.
-- Optional commit bodies will use a secondary administrative composition flow later.
+- Optional commit bodies use `zsh-git-inlay compose`, a user-invoked secondary
+  flow. It starts from an exact-fingerprint candidate that passed all
+  subject/evidence checks; one withheld solely for a required-body policy is
+  never rendered as ghost text. Compose proposes only staged path/status facts,
+  opens the configured Git editor, rechecks state, and reports a private
+  message-file path. It never commits or stages content; user edits remain
+  user-authored rather than being relabeled as grounded generated facts.
 
 VS Code, JetBrains, model fine-tuning, cross-device synchronization, dashboards,
 and CI enforcement are deferred. This prototype does not implement a managed
 model distribution, output capture, other editor/LSP
-integrations, commit bodies,
+integrations,
 issue trackers, automatic staging, automatic commits, standalone ghost text,
 another shell, GUI/TUI, or telemetry.

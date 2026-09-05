@@ -314,3 +314,34 @@ must remain off the lookup path.
   found no daemon or reachable Ollama. Live OpenAI compatibility, billing,
   availability, and model-quality validation remain unavailable by design; no
   key was used and no repository content was transmitted.
+- 2026-09-05: completed Milestone 12's bounded hintable reranking and
+  secondary body composition. The existing parser now selects only
+  prefix-matching prepared candidates in their original order, without a
+  daemon, context, generation, or questionnaire operation. `compose` is
+  outside the ZLE path: it obtains a current prepared candidate, builds only a
+  bounded `Staged paths:` status/path body tied to exact staged evidence,
+  writes an owner-only `0600` file, and invokes a simple resolved Git-editor
+  executable with literal arguments rather than a shell. Editor selection
+  intentionally ignores repository-local `core.editor`; it accepts only
+  user-controlled editor sources. It reads only the same private regular file,
+  rejects a replacement, checks edited body wrapping and duplicate subject
+  content, then re-snapshots the exact staged state.
+  Mismatched state or policy leaves the edited file for the user and reports no
+  verified result. Success reports that file and `committed: false`; neither
+  staging nor `git commit` is invoked. A required-body policy suppresses all
+  normal ghost text while retaining only candidates that failed solely for that
+  missing body, so compose can complete them without admitting any other
+  ungrounded candidate. Generated facts are grounded; preserved user prose is
+  explicitly user-authored, not relabeled as generated evidence. Focused
+  race-enabled tests covered matching-prefix cycling, malformed/duplicate body
+  rejection, private and symlink file handling, repository-local editor
+  rejection, safe editor parsing, no-commit, staged-state change, and
+  required-body behavior. `go test -race
+  ./internal/command ./internal/grounding ./internal/daemon
+  ./internal/compose ./cmd/zsh-git-inlay`, `make test`, and `make lint` passed;
+  the full test target also passed real-Zsh integration, daemon recovery, and
+  evaluation integration. The final benchmark recorded parser 0.210 µs/op,
+  exact snapshot 6.08 ms/op, deterministic generation 1.10 ms/op, and warm
+  socket lookup 0.067 ms/op, within the 1 ms/25 ms/0.25 ms budgets. `doctor
+  --json` found no running daemon or reachable Ollama; no model, cloud, or paid
+  request occurred.

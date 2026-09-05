@@ -403,6 +403,16 @@ func rankCandidates(response provider.Response, compiled repoctx.Compiled, polic
 	}
 	reports := grounding.Evaluate(response.Candidates, compiled, repositoryPolicy)
 	order := grounding.Rank(reports, policy)
+	if len(order) == 0 && repositoryPolicy.Body == "required" {
+		// Keep only independently safe subject inputs for the secondary compose
+		// workflow. suggest suppresses this record, so no subject-only candidate
+		// can render under a required-body policy.
+		for index, report := range reports {
+			if grounding.EligibleForBodyComposition(report) {
+				order = append(order, index)
+			}
+		}
+	}
 	rankedValues := make([]candidate.Candidate, 0, len(order))
 	rankedReports := make([]grounding.Result, 0, len(order))
 	for rank, index := range order {

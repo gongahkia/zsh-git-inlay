@@ -37,9 +37,10 @@ grounded messages. If none remain, the explicitly configured deterministic
 fallback may supply a conservative factual candidate. `quiet` retains only
 grounded messages. `visible` retains structurally safe ungrounded messages but
 still ranks them last. `zsh-autosuggestions` has no safe per-candidate visual
-treatment, so `visible` is a ranking policy rather than a competing renderer;
-`hintable` uses the same safe selection as conservative and is inspectable via
-diagnostics.
+treatment, so `visible` is a ranking policy rather than a competing renderer.
+With `hintable`, a typed prefix reranks only matching already-prepared
+candidates in their existing safe order; the bounded helper neither starts a
+daemon nor compiles context, generates, or asks an interactive question.
 
 Use the administrative diagnostic after candidates are ready:
 
