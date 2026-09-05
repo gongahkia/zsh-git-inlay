@@ -21,6 +21,7 @@ import (
 	"github.com/gongahkia/zsh-git-inlay/internal/gitstate"
 	"github.com/gongahkia/zsh-git-inlay/internal/grounding"
 	"github.com/gongahkia/zsh-git-inlay/internal/ipc"
+	"github.com/gongahkia/zsh-git-inlay/internal/learning"
 	"github.com/gongahkia/zsh-git-inlay/internal/provider"
 	"github.com/gongahkia/zsh-git-inlay/internal/repoctx"
 	"github.com/gongahkia/zsh-git-inlay/internal/runtime"
@@ -37,6 +38,7 @@ type Record struct {
 	Policy             config.RepositoryPolicy `json:"policy"`
 	Grounding          []grounding.Result      `json:"grounding,omitempty"`
 	Activity           activity.Provenance     `json:"activity,omitempty"`
+	Learning           learning.Explanation    `json:"learning,omitempty"`
 }
 
 type Status struct {
@@ -66,24 +68,28 @@ type Server struct {
 	socket   string
 	cacheDir string
 
-	mu              sync.Mutex
-	cacheMu         sync.Mutex
-	providerMu      sync.RWMutex
-	cache           map[string]Record
-	active          map[string]active
-	jobs            map[string]job
-	nextJob         uint64
-	sem             chan struct{}
-	lastUse         time.Time
-	lastObserve     string
-	cacheStatus     CacheStatus
-	provider        provider.Provider
-	fallback        provider.Provider
-	providerVersion string
-	ambiguityPolicy string
-	activity        *activity.Store
-	stop            chan struct{}
-	stopped         sync.Once
+	mu               sync.Mutex
+	cacheMu          sync.Mutex
+	providerMu       sync.RWMutex
+	cache            map[string]Record
+	active           map[string]active
+	jobs             map[string]job
+	nextJob          uint64
+	sem              chan struct{}
+	lastUse          time.Time
+	lastObserve      string
+	cacheStatus      CacheStatus
+	provider         provider.Provider
+	fallback         provider.Provider
+	providerVersion  string
+	ambiguityPolicy  string
+	activity         *activity.Store
+	learner          *learning.Store
+	learningMu       sync.Mutex
+	learningProfiles map[string]learning.Profile
+	prepared         map[string]preparedLearning
+	stop             chan struct{}
+	stopped          sync.Once
 }
 
 type active struct {
@@ -97,6 +103,14 @@ type job struct {
 	id     uint64
 }
 
+type preparedLearning struct {
+	repository string
+	worktree   string
+	head       string
+	candidates []string
+	createdAt  time.Time
+}
+
 func New(settings config.Settings, socket, cacheDir string) *Server {
 	return newServer(settings, socket, cacheDir, activity.New(activitySettings(settings), func() (activity.Permissions, error) {
 		return activity.Permissions{}, nil
@@ -104,11 +118,15 @@ func New(settings config.Settings, socket, cacheDir string) *Server {
 }
 
 func newServer(settings config.Settings, socket, cacheDir string, events *activity.Store) *Server {
+	return newServerWithLearning(settings, socket, cacheDir, events, nil)
+}
+
+func newServerWithLearning(settings config.Settings, socket, cacheDir string, events *activity.Store, learner *learning.Store) *Server {
 	selected, err := provider.New(settings)
 	if err != nil {
 		selected = provider.Deterministic{}
 	}
-	return &Server{settings: settings, socket: socket, cacheDir: cacheDir, cache: map[string]Record{}, active: map[string]active{}, jobs: map[string]job{}, sem: make(chan struct{}, settings.MaxGenerationJobs), lastUse: time.Now(), cacheStatus: CacheStatus{MaxEntries: settings.CacheMaxRecords, MaxBytes: settings.CacheMaxBytes}, provider: selected, fallback: provider.Fallback(settings), providerVersion: settings.Version, ambiguityPolicy: settings.GroundingPolicy, activity: events, stop: make(chan struct{})}
+	return &Server{settings: settings, socket: socket, cacheDir: cacheDir, cache: map[string]Record{}, active: map[string]active{}, jobs: map[string]job{}, sem: make(chan struct{}, settings.MaxGenerationJobs), lastUse: time.Now(), cacheStatus: CacheStatus{MaxEntries: settings.CacheMaxRecords, MaxBytes: settings.CacheMaxBytes}, provider: selected, fallback: provider.Fallback(settings), providerVersion: settings.Version, ambiguityPolicy: settings.GroundingPolicy, activity: events, learner: learner, learningProfiles: map[string]learning.Profile{}, prepared: map[string]preparedLearning{}, stop: make(chan struct{})}
 }
 
 func activitySettings(settings config.Settings) activity.Settings {
@@ -152,7 +170,11 @@ func Serve(ctx context.Context, settings config.Settings, initialCWD string) err
 		}
 		return activity.LoadPermissions(permissionsPath)
 	})
-	server := newServer(settings, socket, cacheDir, events)
+	var learner *learning.Store
+	if dataErr == nil {
+		learner, _ = learning.New(filepath.Join(dataDir, "learning"))
+	}
+	server := newServerWithLearning(settings, socket, cacheDir, events, learner)
 	if err := server.collectCache(); err != nil {
 		listener.Close()
 		return err
@@ -226,6 +248,12 @@ func (server *Server) handle(connection net.Conn) {
 		reply = server.clearActivity(request.CWD)
 	case "activity_git_state":
 		reply = server.observeActivityGit(request.CWD, request.GitCommit)
+	case "learning_prepare":
+		reply = server.prepareLearning(request.CWD)
+	case "learning_commit":
+		reply = server.commitLearning(request.CWD)
+	case "learning_changed":
+		reply = server.learningChanged(request.CWD)
 	case "stop":
 		reply = ipc.Reply{Version: ipc.Version, Status: "stopping"}
 		go server.Close()
@@ -323,11 +351,12 @@ func (server *Server) generate(ctx context.Context, expected gitstate.State, cwd
 			server.finish(expected.Fingerprint, jobID)
 			return
 		}
+		candidates, reports, learningExplanation := server.applyLearning(ctx, cwd, expected, candidates, reports)
 		checkContext, cancel := gitstate.WithTimeout()
 		current, checkErr := gitstate.Snapshot(checkContext, cwd)
 		cancel()
 		if checkErr == nil && current.Availability == gitstate.Ready && current.Fingerprint == expected.Fingerprint {
-			record := Record{Fingerprint: expected.Fingerprint, Repository: expected.RepoID, Worktree: expected.WorktreeID, ContextFingerprint: expected.ContextFingerprint, Candidates: candidates, CreatedAt: time.Now().UTC(), Provider: generated.Metadata, Policy: repositoryPolicy, Grounding: reports, Activity: activityProvenance}
+			record := Record{Fingerprint: expected.Fingerprint, Repository: expected.RepoID, Worktree: expected.WorktreeID, ContextFingerprint: expected.ContextFingerprint, Candidates: candidates, CreatedAt: time.Now().UTC(), Provider: generated.Metadata, Policy: repositoryPolicy, Grounding: reports, Activity: activityProvenance, Learning: learningExplanation}
 			if server.store(record) == nil {
 				finalContext, finalCancel := gitstate.WithTimeout()
 				final, finalErr := gitstate.Snapshot(finalContext, cwd)
@@ -359,6 +388,60 @@ func rankCandidates(response provider.Response, compiled repoctx.Compiled, polic
 		rankedReports = append(rankedReports, reports[index])
 	}
 	return rankedValues, rankedReports, nil
+}
+
+// applyLearning runs only after repository policy and grounding have rejected
+// unsafe candidates. It can therefore reorder valid candidates but cannot make
+// a profile authorize a type, scope, body, or unsupported claim.
+func (server *Server) applyLearning(ctx context.Context, cwd string, state gitstate.State, candidates []candidate.Candidate, reports []grounding.Result) ([]candidate.Candidate, []grounding.Result, learning.Explanation) {
+	profile, found := server.learningProfile(state.RepoID)
+	if !found {
+		return candidates, reports, learning.Explanation{}
+	}
+	historical, err := learning.Historical(ctx, cwd)
+	if err != nil {
+		historical = learning.Stats{}
+	}
+	messages := make([]string, len(candidates))
+	for index, value := range candidates {
+		messages[index] = value.Message
+	}
+	order, explanation := learning.Reorder(messages, profile, historical)
+	orderedCandidates := make([]candidate.Candidate, 0, len(order))
+	orderedReports := make([]grounding.Result, 0, len(order))
+	orderedAdjustments := make([]learning.Adjustment, 0, len(order))
+	for rank, index := range order {
+		value := candidates[index]
+		value.Rank = rank
+		orderedCandidates = append(orderedCandidates, value)
+		orderedReports = append(orderedReports, reports[index])
+		if len(explanation.Adjustments) == len(order) {
+			adjustment := explanation.Adjustments[index]
+			adjustment.Index = rank
+			orderedAdjustments = append(orderedAdjustments, adjustment)
+		}
+	}
+	if len(orderedAdjustments) == len(order) {
+		explanation.Adjustments = orderedAdjustments
+	}
+	return orderedCandidates, orderedReports, explanation
+}
+
+func (server *Server) learningProfile(repository string) (learning.Profile, bool) {
+	if server.learner == nil {
+		return learning.Profile{}, false
+	}
+	server.learningMu.Lock()
+	defer server.learningMu.Unlock()
+	if profile, found := server.learningProfiles[repository]; found {
+		return profile, true
+	}
+	profile, err := server.learner.Load(repository)
+	if err != nil {
+		return learning.Profile{}, false
+	}
+	server.setLearningProfileLocked(repository, profile)
+	return profile, true
 }
 
 func (server *Server) compileContext(ctx context.Context, cwd string, state gitstate.State, signals []activity.Signal) (repoctx.Compiled, error) {
@@ -459,6 +542,10 @@ func (server *Server) lookup(request ipc.Request) ipc.Reply {
 	if record.Repository != request.Repository || record.Worktree != request.Worktree {
 		return ipc.Reply{Version: ipc.Version, Status: "stale"}
 	}
+	if !server.matchesLearning(record) {
+		server.discardRecord(record.Fingerprint, false)
+		return ipc.Reply{Version: ipc.Version, Status: "stale"}
+	}
 	if !matchesActivity(record, server.activity.Provenance(request.Repository, request.Worktree)) {
 		return ipc.Reply{Version: ipc.Version, Status: "activity_stale"}
 	}
@@ -471,6 +558,14 @@ func (server *Server) lookup(request ipc.Request) ipc.Reply {
 
 func matchesActivity(record Record, current activity.Provenance) bool {
 	return record.Activity.Fingerprint == current.Fingerprint
+}
+
+func (server *Server) matchesLearning(record Record) bool {
+	if server.learner == nil {
+		return true
+	}
+	profile, found := server.learningProfile(record.Repository)
+	return !found || record.Learning.ProfileVersion == profile.Version
 }
 
 func (server *Server) ingestActivity(request ipc.Request) ipc.Reply {
@@ -530,6 +625,172 @@ func (server *Server) observeActivityGit(cwd string, commit bool) ipc.Reply {
 		return ipc.Reply{Version: ipc.Version, Status: "error", Error: err.Error()}
 	}
 	return ipc.Reply{Version: ipc.Version, Status: "ready", Payload: payload}
+}
+
+// prepareLearning stores a short-lived pre-commit candidate snapshot only in
+// daemon memory. A failed or aborted commit therefore cannot create a durable
+// learning signal, and generated messages are never written into profiles.
+func (server *Server) prepareLearning(cwd string) ipc.Reply {
+	if server.learner == nil {
+		return ipc.Reply{Version: ipc.Version, Status: "ignored"}
+	}
+	state, reply := activityScope(cwd)
+	if reply != nil {
+		return *reply
+	}
+	profile, found := server.learningProfile(state.RepoID)
+	if !found || !profile.Enabled {
+		return ipc.Reply{Version: ipc.Version, Status: "ignored"}
+	}
+	prepared := preparedLearning{repository: state.RepoID, worktree: state.WorktreeID, head: state.Head, createdAt: time.Now()}
+	if state.Availability == gitstate.Ready {
+		lookup := server.lookup(ipc.Request{Version: ipc.Version, Operation: "lookup", Fingerprint: state.Fingerprint, Repository: state.RepoID, Worktree: state.WorktreeID})
+		if lookup.Status == "ready" {
+			var record Record
+			if json.Unmarshal(lookup.Payload, &record) == nil {
+				prepared.candidates = make([]string, len(record.Candidates))
+				for index, value := range record.Candidates {
+					prepared.candidates[index] = value.Message
+				}
+			}
+		}
+	}
+	server.learningMu.Lock()
+	server.prunePreparedLocked(time.Now())
+	if _, exists := server.prepared[state.WorktreeID]; !exists && len(server.prepared) >= server.settings.MaxRepositories {
+		server.dropOldestPreparedLocked()
+	}
+	server.prepared[state.WorktreeID] = prepared
+	server.learningMu.Unlock()
+	return ipc.Reply{Version: ipc.Version, Status: "ready"}
+}
+
+func (server *Server) commitLearning(cwd string) ipc.Reply {
+	if server.learner == nil {
+		return ipc.Reply{Version: ipc.Version, Status: "ignored"}
+	}
+	state, reply := activityScope(cwd)
+	if reply != nil {
+		return *reply
+	}
+	server.learningMu.Lock()
+	server.prunePreparedLocked(time.Now())
+	prepared, found := server.prepared[state.WorktreeID]
+	delete(server.prepared, state.WorktreeID)
+	server.learningMu.Unlock()
+	if !found || prepared.repository != state.RepoID || prepared.worktree != state.WorktreeID || prepared.head == state.Head {
+		return ipc.Reply{Version: ipc.Version, Status: "ignored"}
+	}
+	profile, profileFound := server.learningProfile(state.RepoID)
+	if !profileFound || !profile.Enabled {
+		return ipc.Reply{Version: ipc.Version, Status: "ignored"}
+	}
+	metadataContext, cancel := gitstate.WithTimeout()
+	subject, hasBody, err := learning.LatestCommit(metadataContext, cwd)
+	cancel()
+	if err != nil {
+		return ipc.Reply{Version: ipc.Version, Status: "ignored"}
+	}
+	origin, rejectedVerb := classifyLearningCommit(subject, prepared.candidates)
+	updated, err := server.learner.Observe(state.RepoID, learning.Observation{Subject: subject, HasBody: hasBody, Origin: origin, RejectedVerb: rejectedVerb})
+	if err != nil {
+		return ipc.Reply{Version: ipc.Version, Status: "error", Error: err.Error()}
+	}
+	server.learningMu.Lock()
+	server.setLearningProfileLocked(state.RepoID, updated)
+	server.learningMu.Unlock()
+	server.invalidateLearningRepository(state.RepoID)
+	return ipc.Reply{Version: ipc.Version, Status: "ready"}
+}
+
+func classifyLearningCommit(subject string, candidates []string) (learning.Origin, string) {
+	for index, candidate := range candidates {
+		if subject == candidate {
+			if index == 0 {
+				return learning.AcceptedPrimary, ""
+			}
+			return learning.AcceptedAlternative, ""
+		}
+	}
+	if len(candidates) > 0 && learning.Related(subject, candidates[0]) {
+		return learning.EditedCandidate, learning.GenericVerb(candidates[0])
+	}
+	return learning.UserAuthored, ""
+}
+
+func (server *Server) learningChanged(cwd string) ipc.Reply {
+	if server.learner == nil {
+		return ipc.Reply{Version: ipc.Version, Status: "ignored"}
+	}
+	state, reply := activityScope(cwd)
+	if reply != nil {
+		return *reply
+	}
+	profile, err := server.learner.Load(state.RepoID)
+	if err != nil {
+		return ipc.Reply{Version: ipc.Version, Status: "error", Error: err.Error()}
+	}
+	server.learningMu.Lock()
+	server.setLearningProfileLocked(state.RepoID, profile)
+	server.learningMu.Unlock()
+	server.invalidateLearningRepository(state.RepoID)
+	return ipc.Reply{Version: ipc.Version, Status: "ready"}
+}
+
+func (server *Server) prunePreparedLocked(now time.Time) {
+	for worktree, prepared := range server.prepared {
+		if now.Sub(prepared.createdAt) > 10*time.Minute {
+			delete(server.prepared, worktree)
+		}
+	}
+}
+
+func (server *Server) dropOldestPreparedLocked() {
+	var oldest string
+	for worktree, prepared := range server.prepared {
+		if oldest == "" || prepared.createdAt.Before(server.prepared[oldest].createdAt) {
+			oldest = worktree
+		}
+	}
+	if oldest != "" {
+		delete(server.prepared, oldest)
+	}
+}
+
+func (server *Server) setLearningProfileLocked(repository string, profile learning.Profile) {
+	if _, exists := server.learningProfiles[repository]; !exists && len(server.learningProfiles) >= server.settings.MaxRepositories {
+		for stale := range server.learningProfiles {
+			delete(server.learningProfiles, stale)
+			break
+		}
+	}
+	server.learningProfiles[repository] = profile
+}
+
+func (server *Server) invalidateLearningRepository(repository string) {
+	server.mu.Lock()
+	for fingerprint, record := range server.cache {
+		if record.Repository == repository {
+			delete(server.cache, fingerprint)
+		}
+	}
+	server.mu.Unlock()
+	server.cacheMu.Lock()
+	entries, err := os.ReadDir(server.cacheDir)
+	if err == nil {
+		for _, entry := range entries {
+			fingerprint, valid := cacheFilename(entry.Name())
+			if !valid {
+				continue
+			}
+			content, readErr := os.ReadFile(server.cachePath(fingerprint))
+			var record Record
+			if readErr == nil && json.Unmarshal(content, &record) == nil && record.Repository == repository {
+				server.removeCachePathLocked(fingerprint, &server.cacheStatus.StaleDiscarded)
+			}
+		}
+	}
+	server.cacheMu.Unlock()
 }
 
 func activityScope(cwd string) (gitstate.State, *ipc.Reply) {
@@ -796,7 +1057,7 @@ func (server *Server) expired(record Record) bool {
 }
 
 func validRecord(record Record, fingerprint string) bool {
-	if record.Fingerprint != fingerprint || record.Repository == "" || record.Worktree == "" || len(record.ContextFingerprint) != 64 || record.CreatedAt.IsZero() || !record.Provider.Valid() || len(record.Candidates) == 0 || len(record.Candidates) > candidate.MaxCandidates || len(record.Grounding) != len(record.Candidates) {
+	if record.Fingerprint != fingerprint || record.Repository == "" || record.Worktree == "" || len(record.ContextFingerprint) != 64 || record.CreatedAt.IsZero() || !record.Provider.Valid() || len(record.Candidates) == 0 || len(record.Candidates) > candidate.MaxCandidates || len(record.Grounding) != len(record.Candidates) || !learning.ValidExplanation(record.Learning, len(record.Candidates)) {
 		return false
 	}
 	for index, value := range record.Candidates {

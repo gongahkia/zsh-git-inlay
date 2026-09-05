@@ -54,6 +54,20 @@ _zsh_git_inlay_activity_preexec() {
   typeset -g ZSH_GIT_INLAY_ACTIVITY_CLASS="$class"
   typeset -g ZSH_GIT_INLAY_ACTIVITY_STARTED="$SECONDS"
   _zsh_git_inlay_activity_emit shell.command_started "$class"
+  if [[ $class == git-commit ]]; then
+    _zsh_git_inlay_learning_prepare
+  fi
+  return 0
+}
+
+_zsh_git_inlay_learning_prepare() {
+  { command zsh-git-inlay learning prepare --cwd "$PWD" >/dev/null 2>&1 &! }
+}
+
+_zsh_git_inlay_learning_commit() {
+  [[ ${ZSH_GIT_INLAY_LEARNING_COMMIT:-0} == 1 ]] || return 0
+  unset ZSH_GIT_INLAY_LEARNING_COMMIT
+  { command zsh-git-inlay learning commit --cwd "$PWD" >/dev/null 2>&1 &! }
 }
 
 _zsh_git_inlay_activity_finish() {
@@ -66,6 +80,7 @@ _zsh_git_inlay_activity_finish() {
   _zsh_git_inlay_activity_emit shell.command_finished "$class" "status=$exit_status" "duration_ms=$duration_ms"
   if (( exit_status == 0 )) && [[ $class == git-commit ]]; then
     typeset -g ZSH_GIT_INLAY_ACTIVITY_GIT_COMMIT=1
+    typeset -g ZSH_GIT_INLAY_LEARNING_COMMIT=1
   fi
   case "$class" in
     (test) _zsh_git_inlay_activity_emit test.completed "$class" "status=$exit_status" "duration_ms=$duration_ms" ;;
@@ -88,6 +103,7 @@ _zsh_git_inlay_observe() {
   local exit_status=$?
   _zsh_git_inlay_activity_finish "$exit_status"
   _zsh_git_inlay_activity_git_state
+  _zsh_git_inlay_learning_commit
   typeset -g ZSH_GIT_INLAY_CYCLE=0
   { command zsh-git-inlay observe --cwd "$PWD" >/dev/null 2>&1 &! }
 }
@@ -127,8 +143,8 @@ zsh_git_inlay_unload() {
     bindkey -M emacs "$_ZSH_GIT_INLAY_CYCLE_KEY" "$_ZSH_GIT_INLAY_CYCLE_ORIGINAL_WIDGET"
   fi
   zle -D zsh-git-inlay-cycle 2>/dev/null
-  unset ZSH_GIT_INLAY_ACTIVITY_CLASS ZSH_GIT_INLAY_ACTIVITY_STARTED ZSH_GIT_INLAY_ACTIVITY_GIT_COMMIT
-  unfunction _zsh_autosuggest_strategy_git-inlay _zsh_git_inlay_activity_classify _zsh_git_inlay_activity_emit _zsh_git_inlay_activity_preexec _zsh_git_inlay_activity_finish _zsh_git_inlay_activity_git_state _zsh_git_inlay_observe _zsh_git_inlay_commit_context _zsh_git_inlay_cycle_widget _zsh_git_inlay_bind_cycle
+  unset ZSH_GIT_INLAY_ACTIVITY_CLASS ZSH_GIT_INLAY_ACTIVITY_STARTED ZSH_GIT_INLAY_ACTIVITY_GIT_COMMIT ZSH_GIT_INLAY_LEARNING_COMMIT
+  unfunction _zsh_autosuggest_strategy_git-inlay _zsh_git_inlay_activity_classify _zsh_git_inlay_activity_emit _zsh_git_inlay_activity_preexec _zsh_git_inlay_learning_prepare _zsh_git_inlay_learning_commit _zsh_git_inlay_activity_finish _zsh_git_inlay_activity_git_state _zsh_git_inlay_observe _zsh_git_inlay_commit_context _zsh_git_inlay_cycle_widget _zsh_git_inlay_bind_cycle
 }
 
 ZSH_AUTOSUGGEST_STRATEGY=(git-inlay "${ZSH_AUTOSUGGEST_STRATEGY[@]}")

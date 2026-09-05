@@ -115,12 +115,17 @@ Neovim 0.10+ can optionally emit bounded file and diagnostic-count activity
 events; it never renders suggestions or reads buffer content. See [the Neovim
 adapter guide](docs/NEOVIM.md).
 
+Repository-local preference learning is enabled by default. It keeps only
+bounded aggregate style counts from completed local commits, ranks only
+already-grounded candidates, and has inspect/reset/disable/export/import
+controls. See [the learning guide](docs/LEARNING.md).
+
 The runtime socket defaults to `$XDG_RUNTIME_DIR/zsh-git-inlay/daemon.sock`; when that is unavailable, it uses a private XDG cache fallback. `ZSH_GIT_INLAY_RUNTIME_DIR` and `ZSH_GIT_INLAY_CACHE_DIR` are test and troubleshooting overrides.
 
 ## Diagnostics and development
 
 `fingerprint`, `context`, `status`, `candidates`, `explain`, `permissions`,
-`activity`, and `daemon stop` are administrative commands, not alternate
+`activity`, `learning`, and `daemon stop` are administrative commands, not alternate
 commit-message workflows:
 
 ```zsh
@@ -132,6 +137,7 @@ zsh-git-inlay candidates --cwd .
 zsh-git-inlay explain --cwd . --json
 zsh-git-inlay permissions
 zsh-git-inlay activity inspect --cwd . --json
+zsh-git-inlay learning inspect --cwd . --json
 zsh-git-inlay suggest --cwd . --buffer 'git commit -m ' --json
 zsh-git-inlay daemon stop
 ```
@@ -166,4 +172,4 @@ rm "$HOME/.local/bin/zsh-git-inlay"
 
 Optional cached candidates are under `$XDG_CACHE_HOME/zsh-git-inlay` (or `~/.cache/zsh-git-inlay`). Removing that directory is recoverable only from backups; it contains no repository content, only candidate metadata records.
 
-Further design, security, and roadmap details are in [PRODUCT.md](docs/PRODUCT.md), [ARCHITECTURE.md](docs/ARCHITECTURE.md), [ACTIVITY.md](docs/ACTIVITY.md), [NEOVIM.md](docs/NEOVIM.md), and [THREAT-MODEL.md](docs/THREAT-MODEL.md).
+Further design, security, and roadmap details are in [PRODUCT.md](docs/PRODUCT.md), [ARCHITECTURE.md](docs/ARCHITECTURE.md), [ACTIVITY.md](docs/ACTIVITY.md), [LEARNING.md](docs/LEARNING.md), [NEOVIM.md](docs/NEOVIM.md), and [THREAT-MODEL.md](docs/THREAT-MODEL.md).

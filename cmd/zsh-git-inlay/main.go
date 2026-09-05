@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -22,6 +23,7 @@ import (
 	"github.com/gongahkia/zsh-git-inlay/internal/gitstate"
 	"github.com/gongahkia/zsh-git-inlay/internal/grounding"
 	"github.com/gongahkia/zsh-git-inlay/internal/ipc"
+	"github.com/gongahkia/zsh-git-inlay/internal/learning"
 	"github.com/gongahkia/zsh-git-inlay/internal/managed"
 	"github.com/gongahkia/zsh-git-inlay/internal/provider"
 	"github.com/gongahkia/zsh-git-inlay/internal/repoctx"
@@ -66,6 +68,8 @@ func run(arguments []string) error {
 		return permissionsCommand(arguments[1:])
 	case "activity":
 		return activityCommand(arguments[1:])
+	case "learning":
+		return learningCommand(arguments[1:])
 	case "daemon":
 		return daemonCommand(arguments[1:])
 	default:
@@ -74,7 +78,7 @@ func run(arguments []string) error {
 }
 
 func usage() error {
-	return errors.New("usage: zsh-git-inlay {doctor|config|status|fingerprint|context|observe|suggest|candidates|explain|evaluate|model|permissions|activity|daemon serve|daemon stop}")
+	return errors.New("usage: zsh-git-inlay {doctor|config|status|fingerprint|context|observe|suggest|candidates|explain|evaluate|model|permissions|activity|learning|daemon serve|daemon stop}")
 }
 
 func commonFlags(name string) (*flag.FlagSet, *string, *bool) {
@@ -323,19 +327,24 @@ func explain(arguments []string) error {
 		return errors.New("grounding diagnostics are unavailable for this candidate record")
 	}
 	type explanation struct {
-		Message   string           `json:"message"`
-		Grounding grounding.Result `json:"grounding"`
+		Message   string              `json:"message"`
+		Grounding grounding.Result    `json:"grounding"`
+		Learning  learning.Adjustment `json:"learning,omitempty"`
 	}
 	values := make([]explanation, len(record.Candidates))
 	for index, candidate := range record.Candidates {
-		values[index] = explanation{Message: candidate.Message, Grounding: record.Grounding[index]}
+		value := explanation{Message: candidate.Message, Grounding: record.Grounding[index]}
+		if len(record.Learning.Adjustments) == len(record.Candidates) {
+			value.Learning = record.Learning.Adjustments[index]
+		}
+		values[index] = value
 	}
 	if *jsonOutput {
-		return printJSON(map[string]any{"fingerprint": record.Fingerprint, "provider": record.Provider, "policy": record.Policy, "candidates": values})
+		return printJSON(map[string]any{"fingerprint": record.Fingerprint, "provider": record.Provider, "policy": record.Policy, "learning": record.Learning, "candidates": values})
 	}
 	fmt.Printf("policy: %s (%s)\n", record.Policy.Source, record.Policy.Version)
 	for _, value := range values {
-		fmt.Printf("%s\n  %s score=%d\n", value.Message, value.Grounding.State, value.Grounding.Score)
+		fmt.Printf("%s\n  %s score=%d learning=%d\n", value.Message, value.Grounding.State, value.Grounding.Score, value.Learning.Score)
 		for _, check := range value.Grounding.Checks {
 			outcome := "failed"
 			if check.Passed {
@@ -491,6 +500,255 @@ func permissionsCommand(arguments []string) error {
 		return err
 	}
 	return printJSON(permissions)
+}
+
+func learningCommand(arguments []string) error {
+	if len(arguments) == 0 {
+		return errors.New("usage: zsh-git-inlay learning {status|inspect|reset|disable|enable|export|import|clone-import}")
+	}
+	switch arguments[0] {
+	case "status", "inspect":
+		return learningInspect(arguments)
+	case "reset", "disable", "enable":
+		return learningMutate(arguments)
+	case "export":
+		return learningExport(arguments[1:])
+	case "import":
+		return learningImport(arguments[1:])
+	case "clone-import":
+		return learningCloneImport(arguments[1:])
+	case "prepare", "commit":
+		return learningHook(arguments[0], arguments[1:])
+	default:
+		return errors.New("usage: zsh-git-inlay learning {status|inspect|reset|disable|enable|export|import|clone-import}")
+	}
+}
+
+func learningInspect(arguments []string) error {
+	flags, cwdFlag, jsonOutput := commonFlags("learning " + arguments[0])
+	if err := flags.Parse(arguments[1:]); err != nil || flags.NArg() != 0 {
+		return errors.New("usage: zsh-git-inlay learning " + arguments[0] + " [--cwd <directory>] [--json]")
+	}
+	cwd, state, store, err := learningScope(*cwdFlag)
+	if err != nil {
+		return err
+	}
+	profile, err := store.Load(state.RepoID)
+	if err != nil {
+		return err
+	}
+	if arguments[0] == "status" {
+		if *jsonOutput {
+			return printJSON(map[string]any{"enabled": profile.Enabled, "profile_version": profile.Version, "local_samples": profile.Local.Samples})
+		}
+		fmt.Printf("enabled: %t\nprofile_version: %d\nlocal_samples: %d\n", profile.Enabled, profile.Version, profile.Local.Samples)
+		return nil
+	}
+	context, cancel := gitstate.WithTimeout()
+	historical, historyErr := learning.Historical(context, cwd)
+	cancel()
+	if historyErr != nil {
+		return fmt.Errorf("inspect historical repository prior: %w", historyErr)
+	}
+	inspection := map[string]any{"profile": profile, "historical_repository_prior": historical}
+	if *jsonOutput {
+		return printJSON(inspection)
+	}
+	fmt.Printf("enabled: %t\nprofile_version: %d\nlocal_samples: %d\nhistorical_samples: %d\n", profile.Enabled, profile.Version, profile.Local.Samples, historical.Samples)
+	return nil
+}
+
+func learningMutate(arguments []string) error {
+	flags, cwdFlag, jsonOutput := commonFlags("learning " + arguments[0])
+	if err := flags.Parse(arguments[1:]); err != nil || flags.NArg() != 0 {
+		return errors.New("usage: zsh-git-inlay learning " + arguments[0] + " [--cwd <directory>] [--json]")
+	}
+	cwd, state, store, err := learningScope(*cwdFlag)
+	if err != nil {
+		return err
+	}
+	var profile learning.Profile
+	switch arguments[0] {
+	case "reset":
+		if err := store.Reset(state.RepoID); err != nil {
+			return err
+		}
+		profile, err = store.Load(state.RepoID)
+	case "disable":
+		profile, err = store.SetEnabled(state.RepoID, false)
+	case "enable":
+		profile, err = store.SetEnabled(state.RepoID, true)
+	}
+	if err != nil {
+		return err
+	}
+	notifyLearningChanged(cwd)
+	if *jsonOutput {
+		return printJSON(profile)
+	}
+	fmt.Printf("enabled: %t\nprofile_version: %d\nlocal_samples: %d\n", profile.Enabled, profile.Version, profile.Local.Samples)
+	return nil
+}
+
+func learningExport(arguments []string) error {
+	flags, cwdFlag, _ := commonFlags("learning export")
+	if err := flags.Parse(arguments); err != nil || flags.NArg() != 0 {
+		return errors.New("usage: zsh-git-inlay learning export [--cwd <directory>]")
+	}
+	_, state, store, err := learningScope(*cwdFlag)
+	if err != nil {
+		return err
+	}
+	exported, err := store.Export(state.RepoID)
+	if err != nil {
+		return err
+	}
+	return printJSON(exported)
+}
+
+func learningImport(arguments []string) error {
+	flags, cwdFlag, jsonOutput := commonFlags("learning import")
+	filePath := flags.String("file", "", "exported learning profile")
+	if err := flags.Parse(arguments); err != nil || flags.NArg() != 0 || *filePath == "" {
+		return errors.New("usage: zsh-git-inlay learning import --file <path> [--cwd <directory>] [--json]")
+	}
+	cwd, state, store, err := learningScope(*cwdFlag)
+	if err != nil {
+		return err
+	}
+	exported, err := readLearningExport(*filePath)
+	if err != nil {
+		return err
+	}
+	profile, err := store.Import(state.RepoID, exported)
+	if err != nil {
+		return err
+	}
+	notifyLearningChanged(cwd)
+	if *jsonOutput {
+		return printJSON(profile)
+	}
+	fmt.Printf("enabled: %t\nprofile_version: %d\nlocal_samples: %d\n", profile.Enabled, profile.Version, profile.Local.Samples)
+	return nil
+}
+
+func learningCloneImport(arguments []string) error {
+	flags, cwdFlag, jsonOutput := commonFlags("learning clone-import")
+	from := flags.String("from", "", "local clone to import from")
+	confirm := flags.Bool("confirm", false, "confirm matching-clone profile import")
+	if err := flags.Parse(arguments); err != nil || flags.NArg() != 0 || *from == "" {
+		return errors.New("usage: zsh-git-inlay learning clone-import --from <directory> --confirm [--cwd <directory>] [--json]")
+	}
+	cwd, target, store, err := learningScope(*cwdFlag)
+	if err != nil {
+		return err
+	}
+	sourceDirectory, err := filepath.Abs(*from)
+	if err != nil {
+		return err
+	}
+	context, cancel := gitstate.WithTimeout()
+	source, err := gitstate.Snapshot(context, sourceDirectory)
+	cancel()
+	if err != nil || source.Root == "" || source.RepoID == "" {
+		return errors.New("source is not a Git worktree")
+	}
+	context, cancel = gitstate.WithTimeout()
+	targetRemote, targetErr := learning.RemoteHash(context, cwd)
+	cancel()
+	context, cancel = gitstate.WithTimeout()
+	sourceRemote, sourceErr := learning.RemoteHash(context, source.Root)
+	cancel()
+	if targetErr != nil || sourceErr != nil || targetRemote != sourceRemote {
+		return errors.New("source clone does not match this repository's normalized origin")
+	}
+	if !*confirm {
+		return errors.New("matching clone profile import requires explicit --confirm")
+	}
+	exported, err := store.Export(source.RepoID)
+	if err != nil {
+		return err
+	}
+	profile, err := store.Import(target.RepoID, exported)
+	if err != nil {
+		return err
+	}
+	notifyLearningChanged(cwd)
+	if *jsonOutput {
+		return printJSON(profile)
+	}
+	fmt.Printf("enabled: %t\nprofile_version: %d\nlocal_samples: %d\n", profile.Enabled, profile.Version, profile.Local.Samples)
+	return nil
+}
+
+func learningHook(action string, arguments []string) error {
+	flags, cwdFlag, _ := commonFlags("learning " + action)
+	if err := flags.Parse(arguments); err != nil || flags.NArg() != 0 {
+		return errors.New("invalid learning hook arguments")
+	}
+	cwd, err := resolveCWD(*cwdFlag)
+	if err != nil {
+		return err
+	}
+	reply, err := call(ipc.Request{Version: ipc.Version, Operation: "learning_" + action, CWD: cwd}, 75*time.Millisecond)
+	if err != nil || (reply.Status != "ready" && reply.Status != "ignored") {
+		return nil
+	}
+	return nil
+}
+
+func learningScope(value string) (string, gitstate.State, *learning.Store, error) {
+	cwd, err := resolveCWD(value)
+	if err != nil {
+		return "", gitstate.State{}, nil, err
+	}
+	context, cancel := gitstate.WithTimeout()
+	state, err := gitstate.Snapshot(context, cwd)
+	cancel()
+	if err != nil {
+		return "", gitstate.State{}, nil, err
+	}
+	if state.Root == "" || state.RepoID == "" {
+		return "", gitstate.State{}, nil, errors.New("learning requires a Git worktree")
+	}
+	directory, err := runtimepath.DataDir()
+	if err != nil {
+		return "", gitstate.State{}, nil, err
+	}
+	store, err := learning.New(filepath.Join(directory, "learning"))
+	if err != nil {
+		return "", gitstate.State{}, nil, err
+	}
+	return cwd, state, store, nil
+}
+
+func readLearningExport(path string) (learning.Export, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return learning.Export{}, err
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() > 16*1024 {
+		return learning.Export{}, errors.New("learning import is not a bounded regular file")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return learning.Export{}, err
+	}
+	defer file.Close()
+	decoder := json.NewDecoder(io.LimitReader(file, 16*1024))
+	decoder.DisallowUnknownFields()
+	var exported learning.Export
+	if err := decoder.Decode(&exported); err != nil {
+		return learning.Export{}, fmt.Errorf("decode learning import: %w", err)
+	}
+	if decoder.Decode(&struct{}{}) != io.EOF {
+		return learning.Export{}, errors.New("decode learning import: trailing content")
+	}
+	return exported, nil
+}
+
+func notifyLearningChanged(cwd string) {
+	_, _ = call(ipc.Request{Version: ipc.Version, Operation: "learning_changed", CWD: cwd}, 100*time.Millisecond)
 }
 
 func activityCommand(arguments []string) error {

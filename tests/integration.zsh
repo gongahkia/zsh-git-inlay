@@ -115,6 +115,7 @@ _zsh_autosuggest_strategy_git-inlay "$base"
 zsh_git_inlay_unload
 [[ ${ZSH_AUTOSUGGEST_STRATEGY[(Ie)git-inlay]} == 0 ]] || { print -u2 -- 'unload left strategy registered'; exit 1 }
 (( ! ${+functions[_zsh_git_inlay_activity_preexec]} )) || { print -u2 -- 'unload left activity hook registered'; exit 1 }
+(( ! ${+functions[_zsh_git_inlay_learning_prepare]} )) || { print -u2 -- 'unload left learning hook registered'; exit 1 }
 
 missing_result=$(zsh -dfc 'source "'$project_dir'/zsh-git-inlay.plugin.zsh"; print -r -- "$ZSH_GIT_INLAY_DEPENDENCY_ERROR"' 2>&1)
 [[ $missing_result == *'requires zsh-autosuggestions'* ]] || { print -u2 -- 'missing dependency diagnostic was not actionable'; exit 1 }

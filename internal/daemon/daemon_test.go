@@ -19,6 +19,7 @@ import (
 	"github.com/gongahkia/zsh-git-inlay/internal/gitstate"
 	"github.com/gongahkia/zsh-git-inlay/internal/grounding"
 	"github.com/gongahkia/zsh-git-inlay/internal/ipc"
+	"github.com/gongahkia/zsh-git-inlay/internal/learning"
 	"github.com/gongahkia/zsh-git-inlay/internal/provider"
 	"github.com/gongahkia/zsh-git-inlay/internal/repoctx"
 )
@@ -69,6 +70,75 @@ func TestSupersededStateCannotPublish(t *testing.T) {
 	}
 	if _, err := os.Stat(server.cachePath(first.Fingerprint)); !os.IsNotExist(err) {
 		t.Fatalf("superseded candidate was published on disk: %v", err)
+	}
+}
+
+func TestLearningObservesOnlyACompletedCommit(t *testing.T) {
+	server, _ := testServer(t)
+	store, err := learning.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.learner = store
+	repository := daemonRepository(t, "learning.go")
+	if reply := server.prepareLearning(repository); reply.Status != "ready" {
+		t.Fatalf("prepare = %#v", reply)
+	}
+	if reply := server.commitLearning(repository); reply.Status != "ignored" {
+		t.Fatalf("aborted commit = %#v", reply)
+	}
+	before := daemonSnapshot(t, repository)
+	server.learningMu.Lock()
+	server.prepared[before.WorktreeID] = preparedLearning{repository: before.RepoID, worktree: before.WorktreeID, head: before.Head, candidates: []string{"fix(api): update parser"}, createdAt: time.Now()}
+	server.learningMu.Unlock()
+	daemonGit(t, repository, "commit", "-qm", "fix(api): update parser")
+	if reply := server.commitLearning(repository); reply.Status != "ready" {
+		t.Fatalf("completed commit = %#v", reply)
+	}
+	after, err := gitstate.Snapshot(context.Background(), repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, err := store.Load(after.RepoID)
+	if err != nil || profile.Local.Samples != 1 || profile.Local.Types["fix"] != 1 {
+		t.Fatalf("profile=%#v err=%v", profile, err)
+	}
+	if _, err := store.SetEnabled(after.RepoID, false); err != nil {
+		t.Fatal(err)
+	}
+	if reply := server.learningChanged(repository); reply.Status != "ready" {
+		t.Fatalf("disable notification = %#v", reply)
+	}
+	if err := os.WriteFile(filepath.Join(repository, "second.go"), []byte("second\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	daemonGit(t, repository, "add", "second.go")
+	second := daemonSnapshot(t, repository)
+	server.learningMu.Lock()
+	server.prepared[second.WorktreeID] = preparedLearning{repository: second.RepoID, worktree: second.WorktreeID, head: second.Head, createdAt: time.Now()}
+	server.learningMu.Unlock()
+	daemonGit(t, repository, "commit", "-qm", "feat(api): add second")
+	if reply := server.commitLearning(repository); reply.Status != "ignored" {
+		t.Fatalf("disabled learning commit = %#v", reply)
+	}
+	profile, err = store.Load(after.RepoID)
+	if err != nil || profile.Local.Samples != 1 {
+		t.Fatalf("disabled profile=%#v err=%v", profile, err)
+	}
+}
+
+func TestLearningClassificationIsBoundedAndConservative(t *testing.T) {
+	if origin, _ := classifyLearningCommit("fix(api): update parser", []string{"fix(api): update parser"}); origin != learning.AcceptedPrimary {
+		t.Fatalf("primary origin = %q", origin)
+	}
+	if origin, _ := classifyLearningCommit("fix(api): improve parser", []string{"fix(api): update parser", "fix(api): improve parser"}); origin != learning.AcceptedAlternative {
+		t.Fatalf("alternative origin = %q", origin)
+	}
+	if origin, rejected := classifyLearningCommit("fix(api): change parser", []string{"fix(api): update parser"}); origin != learning.EditedCandidate || rejected != "update" {
+		t.Fatalf("edited origin=%q rejected=%q", origin, rejected)
+	}
+	if origin, _ := classifyLearningCommit("docs(readme): update guide", []string{"fix(api): update parser"}); origin != learning.UserAuthored {
+		t.Fatalf("authored origin = %q", origin)
 	}
 }
 

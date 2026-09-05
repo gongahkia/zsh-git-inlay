@@ -14,7 +14,9 @@ import (
 	"github.com/gongahkia/zsh-git-inlay/internal/activity"
 	"github.com/gongahkia/zsh-git-inlay/internal/config"
 	"github.com/gongahkia/zsh-git-inlay/internal/daemon"
+	"github.com/gongahkia/zsh-git-inlay/internal/gitstate"
 	"github.com/gongahkia/zsh-git-inlay/internal/ipc"
+	"github.com/gongahkia/zsh-git-inlay/internal/learning"
 )
 
 func TestContextCommandReportsSummaryWithoutSourceContent(t *testing.T) {
@@ -51,6 +53,7 @@ func TestExplainCommandReportsGroundingForPreparedCandidate(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("ZSH_GIT_INLAY_RUNTIME_DIR", runtimeDirectory)
 	t.Setenv("ZSH_GIT_INLAY_CACHE_DIR", cacheDirectory)
+	t.Setenv("ZSH_GIT_INLAY_DATA_DIR", filepath.Join(t.TempDir(), "data"))
 	commandGit(t, repository, "init", "-q", "-b", "main")
 	if err := os.WriteFile(filepath.Join(repository, "parser_test.go"), []byte("package parser\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -79,7 +82,7 @@ func TestExplainCommandReportsGroundingForPreparedCandidate(t *testing.T) {
 		if err == nil {
 			var report map[string]any
 			if json.Unmarshal([]byte(output), &report) == nil {
-				if candidates, ok := report["candidates"].([]any); ok && len(candidates) > 0 && report["policy"] != nil {
+				if candidates, ok := report["candidates"].([]any); ok && len(candidates) > 0 && report["policy"] != nil && report["learning"] != nil {
 					return
 				}
 			}
@@ -165,6 +168,92 @@ func TestActivityEmitCommandUsesConsentAndRedactsProducerData(t *testing.T) {
 	if err != nil || strings.Contains(output, "ghp_not_retained") || !strings.Contains(output, "[REDACTED]") || !strings.Contains(output, "test.completed") {
 		t.Fatalf("activity inspection output=%q err=%v", output, err)
 	}
+}
+
+func TestLearningCommandsAreScopedResettableAndCloneConfirmed(t *testing.T) {
+	dataDirectory := t.TempDir()
+	t.Setenv("ZSH_GIT_INLAY_DATA_DIR", dataDirectory)
+	first, second := learningRepository(t), learningRepository(t)
+	commandGit(t, first, "remote", "add", "origin", "https://name:token@example.invalid/owner/repository.git?private=true")
+	commandGit(t, second, "remote", "add", "origin", "https://example.invalid/owner/repository.git")
+	context, cancel := gitstate.WithTimeout()
+	firstState, err := gitstate.Snapshot(context, first)
+	cancel()
+	if err != nil || firstState.Root == "" {
+		t.Fatalf("first state=%#v err=%v", firstState, err)
+	}
+	store, err := learning.New(filepath.Join(dataDirectory, "learning"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Observe(firstState.RepoID, learning.Observation{Subject: "fix(api): update parser", Origin: learning.UserAuthored}); err != nil {
+		t.Fatal(err)
+	}
+	status, err := captureCommandOutput(func() error { return run([]string{"learning", "status", "--cwd", first}) })
+	if err != nil || !strings.Contains(status, "enabled: true") || !strings.Contains(status, "local_samples: 1") {
+		t.Fatalf("learning status=%q err=%v", status, err)
+	}
+	inspection, err := captureCommandOutput(func() error { return run([]string{"learning", "inspect", "--cwd", first, "--json"}) })
+	if err != nil || !strings.Contains(inspection, "historical_repository_prior") || strings.Contains(inspection, "establish base") {
+		t.Fatalf("learning inspect=%q err=%v", inspection, err)
+	}
+	if _, err := captureCommandOutput(func() error { return run([]string{"learning", "disable", "--cwd", first}) }); err != nil {
+		t.Fatal(err)
+	}
+	exported, err := captureCommandOutput(func() error { return run([]string{"learning", "export", "--cwd", first}) })
+	if err != nil || strings.Contains(exported, "parser") {
+		t.Fatalf("learning export=%q err=%v", exported, err)
+	}
+	exportPath := filepath.Join(t.TempDir(), "profile.json")
+	if err := os.WriteFile(exportPath, []byte(exported), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := captureCommandOutput(func() error { return run([]string{"learning", "reset", "--cwd", first}) }); err != nil {
+		t.Fatal(err)
+	}
+	reset, err := store.Load(firstState.RepoID)
+	if err != nil || reset.Local.Samples != 0 || !reset.Enabled {
+		t.Fatalf("reset=%#v err=%v", reset, err)
+	}
+	if _, err := captureCommandOutput(func() error { return run([]string{"learning", "import", "--cwd", first, "--file", exportPath}) }); err != nil {
+		t.Fatal(err)
+	}
+	imported, err := store.Load(firstState.RepoID)
+	if err != nil || imported.Local.Samples != 1 || imported.Enabled {
+		t.Fatalf("imported=%#v err=%v", imported, err)
+	}
+	if err := run([]string{"learning", "clone-import", "--cwd", second, "--from", first}); err == nil {
+		t.Fatal("matching clone import did not require confirmation")
+	}
+	if _, err := captureCommandOutput(func() error {
+		return run([]string{"learning", "clone-import", "--cwd", second, "--from", first, "--confirm"})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	context, cancel = gitstate.WithTimeout()
+	secondState, err := gitstate.Snapshot(context, second)
+	cancel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cloned, err := store.Load(secondState.RepoID)
+	if err != nil || cloned.Repository == firstState.RepoID || cloned.Local.Samples != 1 {
+		t.Fatalf("clone import=%#v err=%v", cloned, err)
+	}
+}
+
+func learningRepository(t *testing.T) string {
+	t.Helper()
+	repository := t.TempDir()
+	commandGit(t, repository, "init", "-q", "-b", "main")
+	commandGit(t, repository, "config", "user.name", "Test")
+	commandGit(t, repository, "config", "user.email", "test@example.invalid")
+	if err := os.WriteFile(filepath.Join(repository, "file.txt"), []byte("base\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	commandGit(t, repository, "add", "file.txt")
+	commandGit(t, repository, "commit", "-qm", "chore(repo): establish base")
+	return repository
 }
 
 func captureCommandOutput(run func() error) (string, error) {

@@ -88,10 +88,12 @@ its evidence references against the compiled staged context and ranks valid
 messages before publication. It records grounding states and individual
 deterministic versus heuristic checks alongside the cache record for `explain`.
 Unsupported evidence, issue, test, fix, or behavioral claims are rejected or
-demoted according to the user-global ambiguity policy. Recent subject type is
-an additional style ranking signal; future learned preferences are not yet an
-input. This work occurs before publication; it adds no operation to the
-strategy or warm lookup path.
+demoted according to the user-global ambiguity policy. Recent subject type and
+the private local learning profile are additional style ranking signals. The
+profile is read during background generation, after grounding and repository
+policy, and its applied bounded reasons are retained in the candidate record
+for `explain`; it adds no operation to the strategy or warm lookup path. See
+[LEARNING.md](LEARNING.md).
 
 Repository policy is loaded as strict declarative data before grounding. It can
 restrict message types/scopes, infer scopes from bounded changed paths, apply

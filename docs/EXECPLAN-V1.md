@@ -263,3 +263,26 @@ must remain off the lookup path.
   0.103 ms/op, within the 1 ms/25 ms/0.25 ms budgets. Doctor found no daemon or
   reachable Ollama; no model request or download occurred. `test-nvim` reports
   an explicit skip when Neovim is unavailable; this host ran it on Neovim 0.11.6.
+- 2026-09-05: completed Milestone 10's local preference learning. A private,
+  versioned repository profile holds only bounded aggregate style counts, with
+  128 profiles at 16 KiB each and decay at 4096 observations; it stores no raw
+  commit text, source, activity, remote, credentials, candidates, or provider
+  state. The background daemon first applies repository policy and grounding,
+  then uses explainable bounded local/historical style adjustments. The Zsh
+  hook forwards no command text: it makes a best-effort, short-lived pre-commit
+  snapshot request, and only an actual later HEAD transition lets the daemon
+  reduce the final local commit subject/body before discarding it. Exact
+  candidate matches are classified primary/alternate; same type/scope edited
+  matches are explicitly documented as a weak inference. Aborts have no signal.
+  Status, inspect, disable/enable, reset, repository-neutral export/import, and
+  confirmation-gated local clone import are covered; clone matching strips
+  credentials, query, and fragment data before comparing hashes. Focused race
+  tests plus `make test` and `make lint` passed. Two benchmark runs recorded
+  parser 0.300–0.462 us/op, exact snapshot 8.13–10.13 ms/op, deterministic
+  generation 1.48–1.83 ms/op, and warm socket lookup 0.099–0.136 ms/op. All
+  remain within 1 ms/25 ms/0.25 ms absolute budgets. The first parser and warm
+  results exceeded the 25% relative threshold from M9, but the unchanged parser
+  and second run returned to 0.300 us/op and 0.099 ms/op; [Inference] shared
+  host scheduling is the strongest available explanation, not a demonstrated
+  learning-path regression. Doctor found no daemon or reachable Ollama; no
+  model request or download occurred.
