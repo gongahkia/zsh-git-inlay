@@ -47,6 +47,12 @@ Git exposes no non-blocking transaction that can hold an index stable between a 
 
 The default idle timeout is 15 minutes. The daemon exits only when it has been idle and has no jobs, and the next background observe starts it again. It never modifies the Git index or creates a commit.
 
+Provider generation also stays behind the daemon boundary. The selected local
+provider receives bounded staged metadata and returns an untrusted structured
+response. The daemon validates it, converts it to the existing shell-safe
+candidate form, and applies the same pre/post-publication fingerprint checks.
+The strategy and lookup paths do not invoke a provider or wait for inference.
+
 ## Prototype provider and parser
 
 The provider invokes `git diff --cached --name-status -z --find-renames`, bounds the metadata to 64 KiB, and uses only status and path metadata. It creates three ordered, deterministic conventional-style messages for documentation, tests, dependencies, or general staged changes. It does not read staged source contents. Candidate count and length are bounded.

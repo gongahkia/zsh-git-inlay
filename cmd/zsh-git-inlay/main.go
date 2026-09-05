@@ -20,6 +20,7 @@ import (
 	"github.com/gongahkia/zsh-git-inlay/internal/evaluation"
 	"github.com/gongahkia/zsh-git-inlay/internal/gitstate"
 	"github.com/gongahkia/zsh-git-inlay/internal/ipc"
+	"github.com/gongahkia/zsh-git-inlay/internal/provider"
 	runtimepath "github.com/gongahkia/zsh-git-inlay/internal/runtime"
 )
 
@@ -357,6 +358,27 @@ func doctor(arguments []string) error {
 	}
 	_, zshErr := exec.LookPath("zsh")
 	_, gitErr := exec.LookPath("git")
+	settings, settingsErr := config.Load()
+	ollamaReport := map[string]any{"reachable": false, "models": []string{}}
+	if ollama, err := provider.NewOllama(provider.DefaultOllamaURL, "diagnostic", 250*time.Millisecond); err == nil {
+		if models, modelsErr := ollama.Models(context.Background()); modelsErr == nil {
+			names := make([]string, 0, len(models))
+			for _, model := range models {
+				names = append(names, model.Name)
+			}
+			ollamaReport["reachable"], ollamaReport["models"] = true, names
+		}
+	}
+	if settingsErr == nil && settings.Provider == "ollama" {
+		ollamaReport["configured_model"] = settings.ProviderModel
+		if ollamaReport["reachable"] == true {
+			if ollama, err := provider.NewOllama(provider.DefaultOllamaURL, settings.ProviderModel, 250*time.Millisecond); err == nil {
+				if model, showErr := ollama.Show(context.Background()); showErr == nil {
+					ollamaReport["configured_model_details"] = model.Details
+				}
+			}
+		}
+	}
 	socket, socketErr := runtimepath.SocketPath()
 	state := "unavailable"
 	if socketErr == nil {
@@ -364,11 +386,11 @@ func doctor(arguments []string) error {
 			state = "running"
 		}
 	}
-	report := map[string]any{"zsh": zshErr == nil, "git": gitErr == nil, "zsh_autosuggestions_file": autosuggestions, "daemon": state, "runtime_socket": socket, "go": runtime.Version()}
+	report := map[string]any{"zsh": zshErr == nil, "git": gitErr == nil, "zsh_autosuggestions_file": autosuggestions, "daemon": state, "runtime_socket": socket, "go": runtime.Version(), "ollama": ollamaReport}
 	if *jsonOutput {
 		return printJSON(report)
 	}
-	for _, key := range []string{"zsh", "git", "zsh_autosuggestions_file", "daemon", "runtime_socket", "go"} {
+	for _, key := range []string{"zsh", "git", "zsh_autosuggestions_file", "daemon", "runtime_socket", "ollama", "go"} {
 		fmt.Printf("%s: %v\n", key, report[key])
 	}
 	if !autosuggestions {

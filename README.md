@@ -52,6 +52,12 @@ max_records = 512
 max_bytes = 33554432
 max_age = "168h"
 
+[provider]
+name = "deterministic"
+# model = "qwen2.5-coder:0.5b" # required only for name = "ollama"
+timeout = "8s"
+fallback = "deterministic" # or "none"
+
 [zsh]
 cycle_keybinding = "^Xg"
 
@@ -73,6 +79,10 @@ replays eligible local parent-to-commit staged states into a temporary index.
 Both emit JSON and Markdown reports to a private XDG state directory by default;
 see [the evaluation guide](docs/EVALUATION.md). Evaluation is administrative
 only and does not alter the Zsh suggestion path.
+
+The default provider is deterministic. A locally installed Ollama model can be
+selected explicitly; the plugin never pulls a model and never falls back to a
+cloud service. See [provider configuration and validation status](docs/PROVIDERS.md).
 
 The runtime socket defaults to `$XDG_RUNTIME_DIR/zsh-git-inlay/daemon.sock`; when that is unavailable, it uses a private XDG cache fallback. `ZSH_GIT_INLAY_RUNTIME_DIR` and `ZSH_GIT_INLAY_CACHE_DIR` are test and troubleshooting overrides.
 

@@ -25,16 +25,10 @@ type Candidate struct {
 
 // Generate uses names and status codes only; it never reads staged file content.
 func Generate(ctx context.Context, cwd string) ([]Candidate, error) {
-	command := exec.CommandContext(ctx, "git", "-C", cwd, "diff", "--cached", "--name-status", "-z", "--find-renames")
-	command.Env = []string{"GIT_OPTIONAL_LOCKS=0"}
-	output, err := command.Output()
+	changes, err := StagedChanges(ctx, cwd)
 	if err != nil {
-		return nil, fmt.Errorf("read staged metadata: %w", err)
+		return nil, err
 	}
-	if len(output) > MaxMetadata {
-		return nil, fmt.Errorf("staged metadata exceeds %d byte prototype limit", MaxMetadata)
-	}
-	changes := parseNameStatus(string(output))
 	if len(changes) == 0 {
 		return nil, fmt.Errorf("no staged metadata")
 	}
@@ -78,11 +72,30 @@ func Generate(ctx context.Context, cwd string) ([]Candidate, error) {
 	return result, nil
 }
 
-type change struct{ status, file string }
+// StagedChanges reads only bounded NUL-delimited name/status metadata.
+func StagedChanges(ctx context.Context, cwd string) ([]Change, error) {
+	command := exec.CommandContext(ctx, "git", "-C", cwd, "diff", "--cached", "--name-status", "-z", "--find-renames")
+	command.Env = []string{"GIT_OPTIONAL_LOCKS=0"}
+	output, err := command.Output()
+	if err != nil {
+		return nil, fmt.Errorf("read staged metadata: %w", err)
+	}
+	if len(output) > MaxMetadata {
+		return nil, fmt.Errorf("staged metadata exceeds %d byte prototype limit", MaxMetadata)
+	}
+	return parseNameStatus(string(output)), nil
+}
 
-func parseNameStatus(raw string) []change {
+// Change is bounded staged metadata that is safe to pass between local
+// components. It deliberately excludes staged source content.
+type Change struct {
+	Status string
+	Path   string
+}
+
+func parseNameStatus(raw string) []Change {
 	fields := strings.Split(raw, "\x00")
-	changes := make([]change, 0, len(fields)/2)
+	changes := make([]Change, 0, len(fields)/2)
 	for index := 0; index+1 < len(fields); {
 		status := fields[index]
 		if status == "" {
@@ -98,17 +111,17 @@ func parseNameStatus(raw string) []change {
 			file = fields[index]
 			index++
 		}
-		changes = append(changes, change{status: status, file: file})
+		changes = append(changes, Change{Status: status, Path: file})
 	}
 	return changes
 }
 
-func dominantModule(changes []change) string {
+func dominantModule(changes []Change) string {
 	counts := map[string]int{}
 	for _, change := range changes {
-		part := strings.Split(strings.TrimPrefix(change.file, "./"), "/")[0]
+		part := strings.Split(strings.TrimPrefix(change.Path, "./"), "/")[0]
 		if part == "" || part == "." {
-			part = path.Base(change.file)
+			part = path.Base(change.Path)
 		}
 		counts[normalise(part)]++
 	}
@@ -126,10 +139,10 @@ func dominantModule(changes []change) string {
 	return best
 }
 
-func classify(changes []change) string {
+func classify(changes []Change) string {
 	all := func(match func(string) bool) bool {
 		for _, change := range changes {
-			if !match(strings.ToLower(change.file)) {
+			if !match(strings.ToLower(change.Path)) {
 				return false
 			}
 		}

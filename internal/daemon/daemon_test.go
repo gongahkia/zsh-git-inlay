@@ -17,6 +17,7 @@ import (
 	"github.com/gongahkia/zsh-git-inlay/internal/config"
 	"github.com/gongahkia/zsh-git-inlay/internal/gitstate"
 	"github.com/gongahkia/zsh-git-inlay/internal/ipc"
+	"github.com/gongahkia/zsh-git-inlay/internal/provider"
 )
 
 func TestObservePublishesAtomicScopedCandidates(t *testing.T) {
@@ -66,6 +67,56 @@ func TestSupersededStateCannotPublish(t *testing.T) {
 	if _, err := os.Stat(server.cachePath(first.Fingerprint)); !os.IsNotExist(err) {
 		t.Fatalf("superseded candidate was published on disk: %v", err)
 	}
+}
+
+func TestExplicitDeterministicFallbackPublishesAfterProviderFailure(t *testing.T) {
+	server, _ := testServer(t)
+	server.settings.Provider = "ollama"
+	server.settings.ProviderModel = "missing"
+	server.settings.ProviderFallback = "deterministic"
+	server.provider = failingProvider{}
+	server.fallback = provider.Deterministic{}
+	repository := daemonRepository(t, "fallback.txt")
+	state := daemonSnapshot(t, repository)
+	server.generate(context.Background(), state, repository, 1)
+	server.mu.Lock()
+	record, found := server.cache[state.Fingerprint]
+	server.mu.Unlock()
+	if !found || record.Provider.Name != "deterministic" {
+		t.Fatalf("explicit fallback record = %#v found=%t", record, found)
+	}
+}
+
+func TestObserveRefreshesChangedProviderConfiguration(t *testing.T) {
+	server, _ := testServer(t)
+	configRoot := t.TempDir()
+	path := filepath.Join(configRoot, "zsh-git-inlay", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", configRoot)
+	if err := os.WriteFile(path, []byte("[provider]\nname = \"ollama\"\nmodel = \"qwen2.5-coder:0.5b\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.refreshProvider(); err != nil {
+		t.Fatal(err)
+	}
+	server.providerMu.RLock()
+	metadata := server.provider.Metadata()
+	server.providerMu.RUnlock()
+	if metadata.Name != "ollama" || metadata.Model != "qwen2.5-coder:0.5b" {
+		t.Fatalf("provider refresh = %#v", metadata)
+	}
+}
+
+type failingProvider struct{}
+
+func (failingProvider) Metadata() provider.Metadata {
+	return provider.Metadata{Name: "ollama", Model: "missing", Quantization: "unknown", Runtime: "ollama-local", PromptVersion: "v1"}
+}
+
+func (failingProvider) Generate(context.Context, provider.Request) (provider.Response, error) {
+	return provider.Response{}, fmt.Errorf("Ollama unavailable")
 }
 
 func TestMalformedSocketRequestIsRejected(t *testing.T) {
@@ -330,6 +381,7 @@ func cacheRecordFingerprint(fingerprint string, created time.Time) Record {
 		Repository:  strings.Repeat("r", 64),
 		Worktree:    strings.Repeat("w", 64),
 		CreatedAt:   created,
+		Provider:    provider.Deterministic{}.Metadata(),
 		Candidates: []candidate.Candidate{
 			{Message: "chore(repo): update staged files", Rank: 0},
 			{Message: "chore(repo): refine staged changes", Rank: 1},

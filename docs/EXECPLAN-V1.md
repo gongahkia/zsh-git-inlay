@@ -141,3 +141,12 @@ must remain off the lookup path.
   historical subject is not scored. The corpus has fixture, replay,
   report-privacy, and timeout/error-accounting tests; model-provider wiring is
   deliberately deferred to Milestone 2.
+- 2026-09-05: completed Milestone 2's minimal provider boundary: deterministic
+  and loopback-only Ollama implementations, strict structured output, bounded
+  metadata prompt/response sizes, cancellation, explicit deterministic-or-none
+  fallback, cache provenance, provider-relevant configuration identity, and
+  doctor diagnostics. Mock contract tests cover listing, inspection, shutdown,
+  malformed/trailing output, cancellation, fallback, and supersession. Ollama
+  is absent on this host, so live local-model validation and model comparison
+  are explicitly unavailable; no download was attempted and deterministic
+  remains the default.

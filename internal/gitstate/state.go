@@ -17,7 +17,7 @@ import (
 	"github.com/gongahkia/zsh-git-inlay/internal/config"
 )
 
-const GeneratorVersion = "prototype-v1"
+const GeneratorVersion = "v1-provider-" + config.ProviderPromptVersion
 
 const maxIndexBytes = 64 * 1024 * 1024
 

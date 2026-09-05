@@ -87,6 +87,29 @@ func TestSnapshotHeadAndUnbornIdentity(t *testing.T) {
 	}
 }
 
+func TestSnapshotIncludesProviderConfiguration(t *testing.T) {
+	repository := newRepository(t, false)
+	write(t, repository, "file.txt", "staged\n")
+	gitRun(t, repository, "add", "file.txt")
+	configRoot := t.TempDir()
+	path := filepath.Join(configRoot, "zsh-git-inlay", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", configRoot)
+	if err := os.WriteFile(path, []byte("[provider]\nname = \"deterministic\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	first := snapshot(t, repository)
+	if err := os.WriteFile(path, []byte("[provider]\nname = \"ollama\"\nmodel = \"qwen2.5-coder:0.5b\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	second := snapshot(t, repository)
+	if first.Fingerprint == second.Fingerprint {
+		t.Fatal("provider configuration did not invalidate the staged fingerprint")
+	}
+}
+
 func TestSnapshotIsolatesRepositoriesAndLinkedWorktrees(t *testing.T) {
 	firstRepo := newRepository(t, true)
 	secondRepo := newRepository(t, true)

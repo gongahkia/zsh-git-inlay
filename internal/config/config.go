@@ -11,7 +11,10 @@ import (
 	"time"
 )
 
-const DefaultIdleTimeout = 15 * time.Minute
+const (
+	DefaultIdleTimeout    = 15 * time.Minute
+	ProviderPromptVersion = "v1"
+)
 
 const (
 	DefaultCacheMaxRecords = 512
@@ -26,6 +29,10 @@ type Settings struct {
 	CacheMaxRecords   int
 	CacheMaxBytes     int64
 	CacheMaxAge       time.Duration
+	Provider          string
+	ProviderModel     string
+	ProviderTimeout   time.Duration
+	ProviderFallback  string
 	CycleKeybinding   string
 	Verbose           bool
 	Version           string
@@ -39,6 +46,9 @@ func Default() Settings {
 		CacheMaxRecords:   DefaultCacheMaxRecords,
 		CacheMaxBytes:     DefaultCacheMaxBytes,
 		CacheMaxAge:       DefaultCacheMaxAge,
+		Provider:          "deterministic",
+		ProviderTimeout:   8 * time.Second,
+		ProviderFallback:  "deterministic",
 		CycleKeybinding:   "^Xg",
 		Version:           "default",
 	}
@@ -81,6 +91,10 @@ func Load() (Settings, error) {
 		"cache.max_records":                 true,
 		"cache.max_bytes":                   true,
 		"cache.max_age":                     true,
+		"provider.name":                     true,
+		"provider.model":                    true,
+		"provider.timeout":                  true,
+		"provider.fallback":                 true,
 		"zsh.cycle_keybinding":              true,
 		"diagnostics.verbose":               true,
 	})
@@ -129,6 +143,45 @@ func Load() (Settings, error) {
 		if err != nil || settings.CacheMaxAge <= 0 || settings.CacheMaxAge > 365*24*time.Hour {
 			return Settings{}, fmt.Errorf("invalid config %s: cache.max_age must be positive and at most 8760h", path)
 		}
+	}
+	if value, ok := values["provider.name"]; ok {
+		if !quoted(value) {
+			return Settings{}, fmt.Errorf("invalid config %s: provider.name must be a string", path)
+		}
+		settings.Provider = unquote(value)
+		if settings.Provider != "deterministic" && settings.Provider != "ollama" {
+			return Settings{}, fmt.Errorf("invalid config %s: provider.name must be deterministic or ollama", path)
+		}
+	}
+	if value, ok := values["provider.model"]; ok {
+		if !quoted(value) {
+			return Settings{}, fmt.Errorf("invalid config %s: provider.model must be a string", path)
+		}
+		settings.ProviderModel = unquote(value)
+		if !safeProviderModel(settings.ProviderModel) {
+			return Settings{}, fmt.Errorf("invalid config %s: provider.model contains unsupported characters", path)
+		}
+	}
+	if value, ok := values["provider.timeout"]; ok {
+		if !quoted(value) {
+			return Settings{}, fmt.Errorf("invalid config %s: provider.timeout must be a string duration", path)
+		}
+		settings.ProviderTimeout, err = time.ParseDuration(unquote(value))
+		if err != nil || settings.ProviderTimeout < time.Second || settings.ProviderTimeout > time.Minute {
+			return Settings{}, fmt.Errorf("invalid config %s: provider.timeout must be 1s..1m", path)
+		}
+	}
+	if value, ok := values["provider.fallback"]; ok {
+		if !quoted(value) {
+			return Settings{}, fmt.Errorf("invalid config %s: provider.fallback must be a string", path)
+		}
+		settings.ProviderFallback = unquote(value)
+		if settings.ProviderFallback != "deterministic" && settings.ProviderFallback != "none" {
+			return Settings{}, fmt.Errorf("invalid config %s: provider.fallback must be deterministic or none", path)
+		}
+	}
+	if settings.Provider == "ollama" && settings.ProviderModel == "" {
+		return Settings{}, fmt.Errorf("invalid config %s: provider.model is required for ollama", path)
 	}
 	if value, ok := values["zsh.cycle_keybinding"]; ok {
 		if !quoted(value) {
@@ -235,6 +288,18 @@ func unquote(value string) string {
 
 func quoted(value string) bool {
 	return len(value) >= 2 && ((value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\''))
+}
+
+func safeProviderModel(value string) bool {
+	if value == "" || len(value) > 200 || strings.Contains(value, "://") {
+		return false
+	}
+	for _, character := range value {
+		if !(character >= 'a' && character <= 'z') && !(character >= 'A' && character <= 'Z') && !(character >= '0' && character <= '9') && !strings.ContainsRune("._:/@-", character) {
+			return false
+		}
+	}
+	return true
 }
 
 func stringArray(value string) bool {

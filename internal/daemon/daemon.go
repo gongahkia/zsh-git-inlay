@@ -19,6 +19,7 @@ import (
 	"github.com/gongahkia/zsh-git-inlay/internal/config"
 	"github.com/gongahkia/zsh-git-inlay/internal/gitstate"
 	"github.com/gongahkia/zsh-git-inlay/internal/ipc"
+	"github.com/gongahkia/zsh-git-inlay/internal/provider"
 	"github.com/gongahkia/zsh-git-inlay/internal/runtime"
 )
 
@@ -28,6 +29,7 @@ type Record struct {
 	Worktree    string                `json:"worktree_id"`
 	Candidates  []candidate.Candidate `json:"candidates"`
 	CreatedAt   time.Time             `json:"created_at"`
+	Provider    provider.Metadata     `json:"provider"`
 }
 
 type Status struct {
@@ -57,18 +59,22 @@ type Server struct {
 	socket   string
 	cacheDir string
 
-	mu          sync.Mutex
-	cacheMu     sync.Mutex
-	cache       map[string]Record
-	active      map[string]active
-	jobs        map[string]job
-	nextJob     uint64
-	sem         chan struct{}
-	lastUse     time.Time
-	lastObserve string
-	cacheStatus CacheStatus
-	stop        chan struct{}
-	stopped     sync.Once
+	mu              sync.Mutex
+	cacheMu         sync.Mutex
+	providerMu      sync.RWMutex
+	cache           map[string]Record
+	active          map[string]active
+	jobs            map[string]job
+	nextJob         uint64
+	sem             chan struct{}
+	lastUse         time.Time
+	lastObserve     string
+	cacheStatus     CacheStatus
+	provider        provider.Provider
+	fallback        provider.Provider
+	providerVersion string
+	stop            chan struct{}
+	stopped         sync.Once
 }
 
 type active struct {
@@ -83,7 +89,11 @@ type job struct {
 }
 
 func New(settings config.Settings, socket, cacheDir string) *Server {
-	return &Server{settings: settings, socket: socket, cacheDir: cacheDir, cache: map[string]Record{}, active: map[string]active{}, jobs: map[string]job{}, sem: make(chan struct{}, settings.MaxGenerationJobs), lastUse: time.Now(), cacheStatus: CacheStatus{MaxEntries: settings.CacheMaxRecords, MaxBytes: settings.CacheMaxBytes}, stop: make(chan struct{})}
+	selected, err := provider.New(settings)
+	if err != nil {
+		selected = provider.Deterministic{}
+	}
+	return &Server{settings: settings, socket: socket, cacheDir: cacheDir, cache: map[string]Record{}, active: map[string]active{}, jobs: map[string]job{}, sem: make(chan struct{}, settings.MaxGenerationJobs), lastUse: time.Now(), cacheStatus: CacheStatus{MaxEntries: settings.CacheMaxRecords, MaxBytes: settings.CacheMaxBytes}, provider: selected, fallback: provider.Fallback(settings), providerVersion: settings.Version, stop: make(chan struct{})}
 }
 
 func Serve(ctx context.Context, settings config.Settings, initialCWD string) error {
@@ -191,6 +201,9 @@ func (server *Server) observe(cwd string) ipc.Reply {
 	if cwd == "" || len(cwd) > 4096 {
 		return ipc.Reply{Version: ipc.Version, Status: "malformed", Error: "invalid working directory"}
 	}
+	if err := server.refreshProvider(); err != nil {
+		return server.noteObserve(ipc.Reply{Version: ipc.Version, Status: "error", Error: err.Error()})
+	}
 	snapshotContext, cancel := gitstate.WithTimeout()
 	defer cancel()
 	state, err := gitstate.Snapshot(snapshotContext, cwd)
@@ -242,13 +255,18 @@ func (server *Server) generate(ctx context.Context, expected gitstate.State, cwd
 		server.finish(expected.Fingerprint, jobID)
 		return
 	}
-	candidates, err := candidate.Generate(ctx, cwd)
+	generated, err := server.generateCandidates(ctx, cwd)
 	if err == nil && ctx.Err() == nil {
+		candidates, convertErr := generated.ToCandidates()
+		if convertErr != nil {
+			server.finish(expected.Fingerprint, jobID)
+			return
+		}
 		checkContext, cancel := gitstate.WithTimeout()
 		current, checkErr := gitstate.Snapshot(checkContext, cwd)
 		cancel()
 		if checkErr == nil && current.Availability == gitstate.Ready && current.Fingerprint == expected.Fingerprint {
-			record := Record{Fingerprint: expected.Fingerprint, Repository: expected.RepoID, Worktree: expected.WorktreeID, Candidates: candidates, CreatedAt: time.Now().UTC()}
+			record := Record{Fingerprint: expected.Fingerprint, Repository: expected.RepoID, Worktree: expected.WorktreeID, Candidates: candidates, CreatedAt: time.Now().UTC(), Provider: generated.Metadata}
 			if server.store(record) == nil {
 				finalContext, finalCancel := gitstate.WithTimeout()
 				final, finalErr := gitstate.Snapshot(finalContext, cwd)
@@ -262,6 +280,40 @@ func (server *Server) generate(ctx context.Context, expected gitstate.State, cwd
 		}
 	}
 	server.finish(expected.Fingerprint, jobID)
+}
+
+func (server *Server) generateCandidates(ctx context.Context, cwd string) (provider.Response, error) {
+	server.providerMu.RLock()
+	selected, fallback := server.provider, server.fallback
+	server.providerMu.RUnlock()
+	response, err := selected.Generate(ctx, provider.Request{CWD: cwd})
+	if err == nil || fallback == nil {
+		return response, err
+	}
+	return fallback.Generate(ctx, provider.Request{CWD: cwd})
+}
+
+func (server *Server) refreshProvider() error {
+	settings, err := config.Load()
+	if err != nil {
+		return err
+	}
+	server.providerMu.RLock()
+	current := server.providerVersion
+	server.providerMu.RUnlock()
+	if settings.Version == current {
+		return nil
+	}
+	selected, err := provider.New(settings)
+	if err != nil {
+		return err
+	}
+	server.providerMu.Lock()
+	if settings.Version != server.providerVersion {
+		server.provider, server.fallback, server.providerVersion = selected, provider.Fallback(settings), settings.Version
+	}
+	server.providerMu.Unlock()
+	return nil
 }
 
 func (server *Server) finish(fingerprint string, jobID uint64) {
@@ -555,7 +607,7 @@ func (server *Server) expired(record Record) bool {
 }
 
 func validRecord(record Record, fingerprint string) bool {
-	if record.Fingerprint != fingerprint || record.Repository == "" || record.Worktree == "" || record.CreatedAt.IsZero() || len(record.Candidates) == 0 || len(record.Candidates) > candidate.MaxCandidates {
+	if record.Fingerprint != fingerprint || record.Repository == "" || record.Worktree == "" || record.CreatedAt.IsZero() || !record.Provider.Valid() || len(record.Candidates) == 0 || len(record.Candidates) > candidate.MaxCandidates {
 		return false
 	}
 	for index, value := range record.Candidates {
