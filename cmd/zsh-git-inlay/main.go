@@ -20,6 +20,7 @@ import (
 	"github.com/gongahkia/zsh-git-inlay/internal/evaluation"
 	"github.com/gongahkia/zsh-git-inlay/internal/gitstate"
 	"github.com/gongahkia/zsh-git-inlay/internal/ipc"
+	"github.com/gongahkia/zsh-git-inlay/internal/managed"
 	"github.com/gongahkia/zsh-git-inlay/internal/provider"
 	runtimepath "github.com/gongahkia/zsh-git-inlay/internal/runtime"
 )
@@ -52,6 +53,8 @@ func run(arguments []string) error {
 		return status(arguments[1:])
 	case "evaluate":
 		return evaluateCommand(arguments[1:])
+	case "model":
+		return modelCommand(arguments[1:])
 	case "daemon":
 		return daemonCommand(arguments[1:])
 	default:
@@ -60,7 +63,7 @@ func run(arguments []string) error {
 }
 
 func usage() error {
-	return errors.New("usage: zsh-git-inlay {doctor|config|status|fingerprint|observe|suggest|candidates|evaluate|daemon serve|daemon stop}")
+	return errors.New("usage: zsh-git-inlay {doctor|config|status|fingerprint|observe|suggest|candidates|evaluate|model|daemon serve|daemon stop}")
 }
 
 func commonFlags(name string) (*flag.FlagSet, *string, *bool) {
@@ -313,6 +316,48 @@ func evaluateCommand(arguments []string) error {
 	return nil
 }
 
+func modelCommand(arguments []string) error {
+	if len(arguments) == 0 {
+		return errors.New("usage: zsh-git-inlay model {status|install --confirm|rollback <version>|uninstall <version> --confirm}")
+	}
+	directory, err := runtimepath.DataDir()
+	if err != nil {
+		return err
+	}
+	manager, err := managed.New(directory)
+	if err != nil {
+		return err
+	}
+	switch arguments[0] {
+	case "status":
+		if len(arguments) != 1 {
+			return errors.New("usage: zsh-git-inlay model status")
+		}
+		status, err := manager.Status()
+		if err != nil {
+			return err
+		}
+		return printJSON(status)
+	case "install":
+		if len(arguments) != 2 || arguments[1] != "--confirm" {
+			return errors.New("managed model installation requires explicit --confirm")
+		}
+		return errors.New("no authenticated managed runtime/model manifest is bundled; no download was attempted")
+	case "rollback":
+		if len(arguments) != 2 {
+			return errors.New("usage: zsh-git-inlay model rollback <version>")
+		}
+		return manager.Rollback(arguments[1])
+	case "uninstall":
+		if len(arguments) != 3 || arguments[2] != "--confirm" {
+			return errors.New("usage: zsh-git-inlay model uninstall <version> --confirm")
+		}
+		return manager.Uninstall(arguments[1])
+	default:
+		return usage()
+	}
+}
+
 func daemonCommand(arguments []string) error {
 	if len(arguments) == 0 {
 		return usage()
@@ -379,6 +424,14 @@ func doctor(arguments []string) error {
 			}
 		}
 	}
+	managedReport := map[string]any{"available": false}
+	if dataDir, dataErr := runtimepath.DataDir(); dataErr == nil {
+		if manager, managerErr := managed.New(dataDir); managerErr == nil {
+			if managedStatus, statusErr := manager.Status(); statusErr == nil {
+				managedReport["available"], managedReport["status"] = true, managedStatus
+			}
+		}
+	}
 	socket, socketErr := runtimepath.SocketPath()
 	state := "unavailable"
 	if socketErr == nil {
@@ -386,11 +439,11 @@ func doctor(arguments []string) error {
 			state = "running"
 		}
 	}
-	report := map[string]any{"zsh": zshErr == nil, "git": gitErr == nil, "zsh_autosuggestions_file": autosuggestions, "daemon": state, "runtime_socket": socket, "go": runtime.Version(), "ollama": ollamaReport}
+	report := map[string]any{"zsh": zshErr == nil, "git": gitErr == nil, "zsh_autosuggestions_file": autosuggestions, "daemon": state, "runtime_socket": socket, "go": runtime.Version(), "ollama": ollamaReport, "managed_model": managedReport}
 	if *jsonOutput {
 		return printJSON(report)
 	}
-	for _, key := range []string{"zsh", "git", "zsh_autosuggestions_file", "daemon", "runtime_socket", "ollama", "go"} {
+	for _, key := range []string{"zsh", "git", "zsh_autosuggestions_file", "daemon", "runtime_socket", "ollama", "managed_model", "go"} {
 		fmt.Printf("%s: %v\n", key, report[key])
 	}
 	if !autosuggestions {

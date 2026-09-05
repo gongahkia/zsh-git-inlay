@@ -54,3 +54,24 @@ superseded-state publication checks. Ollama is not installed on the current
 Fedora host, so live-server/model validation and a comparison against
 Qwen2.5-Coder 0.5B are unavailable. No model was downloaded. Deterministic
 remains the selected default until a local model passes the evaluation gate.
+
+## Managed runtime status
+
+`zsh-git-inlay model status` reports only the private managed-data directory and
+installed versions. `model install --confirm` requires an explicit confirmation
+even when an authenticated manifest becomes available. The installer design
+uses HTTPS-only artifacts, pinned SHA-256 checksums, bounded resume files,
+private XDG data storage, an atomic staging-to-install rename, current-version
+rollback, and confirmation-gated uninstall. It never touches Ollama models.
+
+The current project deliberately bundles no runtime/model manifest: a pinned
+manifest must authenticate both a specific `llama.cpp` runtime artifact and a
+model license/digest, and this project has neither a release-signing authority
+nor an authenticated model-distribution authority. The `llama.cpp` codebase is
+MIT-licensed, but its own release guidance describes evolving release channels
+and development artifacts rather than a stable third-party distribution contract.
+See [its license](https://github.com/ggml-org/llama.cpp/blob/master/LICENSE) and
+[release process](https://github.com/ggml-org/llama.cpp/blob/master/docs/release.md).
+Consequently `model install --confirm` reports that blocker without downloading.
+Mock fixtures verify the acquisition mechanics; they are not a claim that a
+production runtime/model distribution is available.

@@ -150,3 +150,11 @@ must remain off the lookup path.
   is absent on this host, so live local-model validation and model comparison
   are explicitly unavailable; no download was attempted and deterministic
   remains the default.
+- 2026-09-05: completed Milestone 3's secure managed-model acquisition design:
+  private XDG data storage, HTTPS/pinned-checksum validation, resumable partial
+  artifact handling, atomic installation, rollback, confirmation-gated
+  uninstall, platform checks, and diagnostics are verified with fixtures. No
+  authenticated runtime/model manifest or distribution-signing authority exists
+  for this project, so the install command fails closed without any download.
+  This is an external release-infrastructure blocker, not a completed managed
+  runtime distribution.

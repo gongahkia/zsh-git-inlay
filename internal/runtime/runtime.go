@@ -68,6 +68,22 @@ func EvaluationDir() (string, error) {
 	return ensurePrivate(filepath.Join(state, "evaluations"))
 }
 
+// DataDir stores user-approved managed runtimes and models.
+func DataDir() (string, error) {
+	if override := os.Getenv("ZSH_GIT_INLAY_DATA_DIR"); override != "" {
+		return ensurePrivate(override)
+	}
+	base := os.Getenv("XDG_DATA_HOME")
+	if base == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		base = filepath.Join(home, ".local", "share")
+	}
+	return ensurePrivate(filepath.Join(base, "zsh-git-inlay"))
+}
+
 func SocketPath() (string, error) {
 	directory, err := Dir()
 	if err != nil {
