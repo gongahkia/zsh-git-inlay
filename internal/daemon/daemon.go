@@ -30,11 +30,12 @@ type Record struct {
 }
 
 type Status struct {
-	Socket    string `json:"socket"`
-	Ready     int    `json:"ready"`
-	Pending   int    `json:"pending"`
-	Active    int    `json:"active_repositories"`
-	IdleAfter string `json:"idle_after"`
+	Socket      string `json:"socket"`
+	Ready       int    `json:"ready"`
+	Pending     int    `json:"pending"`
+	Active      int    `json:"active_repositories"`
+	IdleAfter   string `json:"idle_after"`
+	LastObserve string `json:"last_observe,omitempty"`
 }
 
 type Server struct {
@@ -42,15 +43,16 @@ type Server struct {
 	socket   string
 	cacheDir string
 
-	mu      sync.Mutex
-	cache   map[string]Record
-	active  map[string]active
-	jobs    map[string]job
-	nextJob uint64
-	sem     chan struct{}
-	lastUse time.Time
-	stop    chan struct{}
-	stopped sync.Once
+	mu          sync.Mutex
+	cache       map[string]Record
+	active      map[string]active
+	jobs        map[string]job
+	nextJob     uint64
+	sem         chan struct{}
+	lastUse     time.Time
+	lastObserve string
+	stop        chan struct{}
+	stopped     sync.Once
 }
 
 type active struct {
@@ -173,10 +175,10 @@ func (server *Server) observe(cwd string) ipc.Reply {
 	defer cancel()
 	state, err := gitstate.Snapshot(snapshotContext, cwd)
 	if err != nil {
-		return ipc.Reply{Version: ipc.Version, Status: "error", Error: err.Error()}
+		return server.noteObserve(ipc.Reply{Version: ipc.Version, Status: "error", Error: err.Error()})
 	}
 	if state.Availability != gitstate.Ready {
-		return ipc.Reply{Version: ipc.Version, Status: string(state.Availability), Error: state.Reason}
+		return server.noteObserve(ipc.Reply{Version: ipc.Version, Status: string(state.Availability), Error: state.Reason})
 	}
 	server.mu.Lock()
 	server.evictLocked()
@@ -274,10 +276,20 @@ func (server *Server) lookup(request ipc.Request) ipc.Reply {
 
 func (server *Server) status() ipc.Reply {
 	server.mu.Lock()
-	status := Status{Socket: server.socket, Ready: len(server.cache), Pending: len(server.jobs), Active: len(server.active), IdleAfter: server.settings.IdleTimeout.String()}
+	status := Status{Socket: server.socket, Ready: len(server.cache), Pending: len(server.jobs), Active: len(server.active), IdleAfter: server.settings.IdleTimeout.String(), LastObserve: server.lastObserve}
 	server.mu.Unlock()
 	payload, _ := json.Marshal(status)
 	return ipc.Reply{Version: ipc.Version, Status: "ready", Payload: payload}
+}
+
+func (server *Server) noteObserve(reply ipc.Reply) ipc.Reply {
+	server.mu.Lock()
+	server.lastObserve = reply.Status
+	if reply.Error != "" {
+		server.lastObserve += ": " + reply.Error
+	}
+	server.mu.Unlock()
+	return reply
 }
 
 func (server *Server) Close() { server.stopped.Do(func() { close(server.stop) }) }

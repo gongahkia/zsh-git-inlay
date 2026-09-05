@@ -22,14 +22,14 @@ On Fedora Linux 43, an Intel Core i7-1355U, Go `1.26.7`, Git `2.55.0`, and Zsh `
 
 | Operation | Result |
 | --- | --- |
-| Parser/suggestion composition | 0.58 µs/op (`make bench`) |
-| Exact fingerprint | 11.83 ms/op (`make bench`) |
-| Deterministic metadata generation | 2.33 ms/op (`make bench`) |
-| Warm Unix-socket cache lookup round trip | 0.096 ms/op (`make bench`) |
-| Full helper `suggest` path (new process, fingerprint, warm lookup) | 14 ms mean over 100 calls |
-| Helper `fingerprint` path | 13 ms mean over 100 calls |
-| Helper `status` local IPC path | 4 ms mean over 100 calls |
-| Lazy daemon start through candidates-ready | 40 ms in the temporary one-file fixture |
+| Parser/suggestion composition | 0.65 µs/op (`make bench`) |
+| Exact fingerprint | 23.13 ms/op (`make bench`) |
+| Deterministic metadata generation | 4.13 ms/op (`make bench`) |
+| Warm Unix-socket cache lookup round trip | 0.208 ms/op (`make bench`) |
+| Full helper `suggest` path (new process, fingerprint, warm lookup) | 11 ms mean over 100 calls |
+| Helper `fingerprint` path | 12 ms mean over 100 calls |
+| Helper `status` local IPC path | 3 ms mean over 100 calls |
+| Lazy daemon start through candidates-ready | 56 ms in the temporary one-file fixture |
 
 The strategy performs its helper work in `zsh-autosuggestions` asynchronous mode, which the dependency enables by default on Zsh 5.0.8 and later. These are local prototype measurements, not an LLM-latency forecast; repository size, filesystem, and process-launch cost materially affect them.
 
@@ -56,7 +56,7 @@ Press the normal autosuggestion forward-character/end-of-line binding to accept,
 ## Known limitations
 
 - The provider is factual only at the status/path level. It neither reads staged source content nor claims semantic accuracy.
-- Git index identity is exact but requires short Git plumbing calls; default autosuggestions async mode keeps those calls out of synchronous ZLE handling. Explicitly disabling autosuggestions async mode can make the strategy visibly slower on very large indexes.
+- Git index identity is exact but requires short Git plumbing calls and a private copy of the index (capped at 64 MiB); default autosuggestions async mode keeps those calls out of synchronous ZLE handling. Explicitly disabling autosuggestions async mode can make the strategy visibly slower on very large indexes.
 - The strategy starts a helper process for each non-optimized autosuggestion fetch. It has a short socket deadline and no diff/generation work, but it is not a zero-cost in-process API.
 - Explicit configured shell aliases and Git configuration aliases are not implemented. Canonical `git commit` forms are the supported grammar; executable Git aliases are never run.
 - The fallback runtime cache is private but less ideal than a correctly configured `XDG_RUNTIME_DIR`; its parent-directory trust follows local XDG permissions.

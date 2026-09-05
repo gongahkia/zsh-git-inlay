@@ -7,6 +7,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -16,6 +18,8 @@ import (
 )
 
 const GeneratorVersion = "prototype-v1"
+
+const maxIndexBytes = 64 * 1024 * 1024
 
 type Availability string
 
@@ -84,9 +88,13 @@ func Snapshot(ctx context.Context, cwd string) (State, error) {
 		}
 		state.Head, headTree = headParts[0], headParts[1]
 	}
-	tree, err := git(ctx, cwd, "write-tree")
+	tree, err := writeTree(ctx, cwd, gitDir)
 	if err != nil {
-		return State{Availability: Conflicted, Reason: "Git cannot write the current index", Root: root, RepoID: state.RepoID, WorktreeID: state.WorktreeID}, nil
+		unmerged, conflictErr := git(ctx, cwd, "ls-files", "-u")
+		if conflictErr == nil && unmerged != "" {
+			return State{Availability: Conflicted, Reason: "the index contains unresolved conflicts", Root: root, RepoID: state.RepoID, WorktreeID: state.WorktreeID}, nil
+		}
+		return State{}, fmt.Errorf("read exact index tree: %w", err)
 	}
 	state.IndexTree = tree
 
@@ -118,9 +126,68 @@ func Snapshot(ctx context.Context, cwd string) (State, error) {
 	return state, nil
 }
 
+// writeTree gives Git a private copy of the index because write-tree may add a
+// cache-tree extension to the supplied index. The real index remains read-only.
+func writeTree(ctx context.Context, cwd, gitDir string) (string, error) {
+	temporaryDir, err := os.MkdirTemp("", "zsh-git-inlay-index-")
+	if err != nil {
+		return "", fmt.Errorf("create private index copy: %w", err)
+	}
+	defer os.RemoveAll(temporaryDir)
+	indexPath := filepath.Join(temporaryDir, "index")
+	if err := copyIndex(filepath.Join(gitDir, "index"), indexPath); err != nil {
+		return "", err
+	}
+	return gitWithIndex(ctx, cwd, indexPath, "write-tree")
+}
+
+func copyIndex(sourcePath, destinationPath string) error {
+	info, err := os.Lstat(sourcePath)
+	if os.IsNotExist(err) {
+		return nil // Git treats a missing alternate index as an empty index.
+	}
+	if err != nil {
+		return fmt.Errorf("inspect Git index: %w", err)
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("Git index is not a regular file")
+	}
+	if info.Size() > maxIndexBytes {
+		return fmt.Errorf("Git index exceeds %d byte prototype limit", maxIndexBytes)
+	}
+	source, err := os.Open(sourcePath)
+	if err != nil {
+		return fmt.Errorf("open Git index: %w", err)
+	}
+	defer source.Close()
+	destination, err := os.OpenFile(destinationPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return fmt.Errorf("create private index copy: %w", err)
+	}
+	_, copyErr := io.Copy(destination, source)
+	closeErr := destination.Close()
+	if copyErr != nil {
+		return fmt.Errorf("copy Git index: %w", copyErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close private index copy: %w", closeErr)
+	}
+	return nil
+}
+
 func git(ctx context.Context, cwd string, args ...string) (string, error) {
 	command := exec.CommandContext(ctx, "git", append([]string{"-C", cwd}, args...)...)
 	command.Env = []string{"GIT_OPTIONAL_LOCKS=0"}
+	output, err := command.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSuffix(string(output), "\n"), nil
+}
+
+func gitWithIndex(ctx context.Context, cwd, indexPath string, args ...string) (string, error) {
+	command := exec.CommandContext(ctx, "git", append([]string{"-C", cwd}, args...)...)
+	command.Env = []string{"GIT_OPTIONAL_LOCKS=0", "GIT_INDEX_FILE=" + indexPath}
 	output, err := command.Output()
 	if err != nil {
 		return "", err

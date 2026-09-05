@@ -2,6 +2,7 @@ package gitstate
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -137,6 +138,48 @@ func TestSnapshotNoStagedAndOutsideRepository(t *testing.T) {
 	}
 	if state := snapshot(t, t.TempDir()); state.Availability != OutsideRepo {
 		t.Fatalf("availability = %s", state.Availability)
+	}
+}
+
+func TestSnapshotSupportsConcurrentReaders(t *testing.T) {
+	repository := newRepository(t, false)
+	write(t, repository, "file.txt", "staged\n")
+	gitRun(t, repository, "add", "file.txt")
+	errors := make(chan error, 16)
+	for worker := 0; worker < cap(errors); worker++ {
+		go func() {
+			context, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			state, err := Snapshot(context, repository)
+			if err == nil && state.Availability != Ready {
+				err = fmt.Errorf("availability = %s", state.Availability)
+			}
+			errors <- err
+		}()
+	}
+	for worker := 0; worker < cap(errors); worker++ {
+		if err := <-errors; err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestSnapshotDoesNotModifyIndexEntries(t *testing.T) {
+	repository := newRepository(t, false)
+	write(t, repository, "file.txt", "staged\n")
+	gitRun(t, repository, "add", "file.txt")
+	index := filepath.Join(repository, ".git", "index")
+	before, err := os.ReadFile(index)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = snapshot(t, repository)
+	after, err := os.ReadFile(index)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Fatal("snapshot changed the Git index")
 	}
 }
 
