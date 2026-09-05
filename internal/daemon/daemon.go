@@ -20,16 +20,18 @@ import (
 	"github.com/gongahkia/zsh-git-inlay/internal/gitstate"
 	"github.com/gongahkia/zsh-git-inlay/internal/ipc"
 	"github.com/gongahkia/zsh-git-inlay/internal/provider"
+	"github.com/gongahkia/zsh-git-inlay/internal/repoctx"
 	"github.com/gongahkia/zsh-git-inlay/internal/runtime"
 )
 
 type Record struct {
-	Fingerprint string                `json:"fingerprint"`
-	Repository  string                `json:"repository_id"`
-	Worktree    string                `json:"worktree_id"`
-	Candidates  []candidate.Candidate `json:"candidates"`
-	CreatedAt   time.Time             `json:"created_at"`
-	Provider    provider.Metadata     `json:"provider"`
+	Fingerprint        string                `json:"fingerprint"`
+	Repository         string                `json:"repository_id"`
+	Worktree           string                `json:"worktree_id"`
+	ContextFingerprint string                `json:"context_fingerprint"`
+	Candidates         []candidate.Candidate `json:"candidates"`
+	CreatedAt          time.Time             `json:"created_at"`
+	Provider           provider.Metadata     `json:"provider"`
 }
 
 type Status struct {
@@ -255,7 +257,12 @@ func (server *Server) generate(ctx context.Context, expected gitstate.State, cwd
 		server.finish(expected.Fingerprint, jobID)
 		return
 	}
-	generated, err := server.generateCandidates(ctx, cwd)
+	compiled, compileErr := server.compileContext(ctx, cwd, expected)
+	if compileErr != nil {
+		server.finish(expected.Fingerprint, jobID)
+		return
+	}
+	generated, err := server.generateCandidates(ctx, cwd, compiled)
 	if err == nil && ctx.Err() == nil {
 		candidates, convertErr := generated.ToCandidates()
 		if convertErr != nil {
@@ -266,7 +273,7 @@ func (server *Server) generate(ctx context.Context, expected gitstate.State, cwd
 		current, checkErr := gitstate.Snapshot(checkContext, cwd)
 		cancel()
 		if checkErr == nil && current.Availability == gitstate.Ready && current.Fingerprint == expected.Fingerprint {
-			record := Record{Fingerprint: expected.Fingerprint, Repository: expected.RepoID, Worktree: expected.WorktreeID, Candidates: candidates, CreatedAt: time.Now().UTC(), Provider: generated.Metadata}
+			record := Record{Fingerprint: expected.Fingerprint, Repository: expected.RepoID, Worktree: expected.WorktreeID, ContextFingerprint: expected.ContextFingerprint, Candidates: candidates, CreatedAt: time.Now().UTC(), Provider: generated.Metadata}
 			if server.store(record) == nil {
 				finalContext, finalCancel := gitstate.WithTimeout()
 				final, finalErr := gitstate.Snapshot(finalContext, cwd)
@@ -282,15 +289,23 @@ func (server *Server) generate(ctx context.Context, expected gitstate.State, cwd
 	server.finish(expected.Fingerprint, jobID)
 }
 
-func (server *Server) generateCandidates(ctx context.Context, cwd string) (provider.Response, error) {
+func (server *Server) compileContext(ctx context.Context, cwd string, state gitstate.State) (repoctx.Compiled, error) {
+	server.providerMu.RLock()
+	name := server.provider.Metadata().Name
+	server.providerMu.RUnlock()
+	return repoctx.Compile(ctx, cwd, state, name)
+}
+
+func (server *Server) generateCandidates(ctx context.Context, cwd string, compiled repoctx.Compiled) (provider.Response, error) {
 	server.providerMu.RLock()
 	selected, fallback := server.provider, server.fallback
 	server.providerMu.RUnlock()
-	response, err := selected.Generate(ctx, provider.Request{CWD: cwd})
+	request := provider.Request{CWD: cwd, Context: compiled.Prompt(), ContextFingerprint: compiled.ContextFingerprint}
+	response, err := selected.Generate(ctx, request)
 	if err == nil || fallback == nil {
 		return response, err
 	}
-	return fallback.Generate(ctx, provider.Request{CWD: cwd})
+	return fallback.Generate(ctx, request)
 }
 
 func (server *Server) refreshProvider() error {
@@ -607,7 +622,7 @@ func (server *Server) expired(record Record) bool {
 }
 
 func validRecord(record Record, fingerprint string) bool {
-	if record.Fingerprint != fingerprint || record.Repository == "" || record.Worktree == "" || record.CreatedAt.IsZero() || !record.Provider.Valid() || len(record.Candidates) == 0 || len(record.Candidates) > candidate.MaxCandidates {
+	if record.Fingerprint != fingerprint || record.Repository == "" || record.Worktree == "" || len(record.ContextFingerprint) != 64 || record.CreatedAt.IsZero() || !record.Provider.Valid() || len(record.Candidates) == 0 || len(record.Candidates) > candidate.MaxCandidates {
 		return false
 	}
 	for index, value := range record.Candidates {

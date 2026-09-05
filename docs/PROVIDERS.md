@@ -11,7 +11,7 @@ The daemon has a small provider boundary with two implementations:
 
 Ollama uses its documented local `/api/tags`, `/api/show`, and non-streaming
 `/api/generate` endpoints. Generation requests use a JSON schema, bounded
-metadata-only input, a 16 KiB prompt limit, a 64 KiB response limit, a
+staged-only context input, a 16 KiB prompt limit, a 64 KiB response limit, a
 configured timeout, and cancellation from a superseded daemon job. Model output
 is untrusted: strict JSON parsing, candidate-count limits, structural field
 checks, evidence identifier checks, and existing shell-message safety checks
@@ -37,9 +37,11 @@ local-to-cloud fallback.
 
 Provider name, configured model, timeout, fallback policy, and prompt version
 are covered by the global configuration version incorporated into the staged
-fingerprint. Provider metadata is stored with each cache record. Changing this
-configuration therefore creates a new exact candidate identity; old records
-cannot serve the new configuration. Replacing an Ollama tag in place without a
+fingerprint. A versioned context fingerprint adds exact index, HEAD/unborn
+state, branch, worktree, and compiler identity; it is retained with each cache
+record. Changing this configuration or context input therefore creates a new
+exact candidate identity; old records cannot serve the new configuration.
+Replacing an Ollama tag in place without a
 configuration change is not detected by the current cache identity. [Inference]
 This is safe for staged-state isolation but means mutable model tags should not
 be treated as immutable model versions; selecting an immutable model reference
@@ -50,7 +52,9 @@ or changing configuration is required to invalidate such a cache entry.
 Mock HTTP tests cover model enumeration, configured-model inspection,
 non-streaming schema requests, malformed and trailing structured output,
 cancellation, loopback enforcement, explicit deterministic fallback, and
-superseded-state publication checks. Ollama is not installed on the current
+superseded-state publication checks. Context compiler tests additionally cover
+redaction, prompt-injection framing, staged-only reads, deterministic source
+selection, and per-source/aggregate limits. Ollama is not installed on the current
 Fedora host, so live-server/model validation and a comparison against
 Qwen2.5-Coder 0.5B are unavailable. No model was downloaded. Deterministic
 remains the selected default until a local model passes the evaluation gate.

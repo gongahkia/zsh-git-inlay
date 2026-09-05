@@ -84,14 +84,23 @@ The default provider is deterministic. A locally installed Ollama model can be
 selected explicitly; the plugin never pulls a model and never falls back to a
 cloud service. See [provider configuration and validation status](docs/PROVIDERS.md).
 
+When Ollama is selected, the daemon compiles a bounded, staged-only context
+before inference. It includes selected patch and repository evidence, redacts
+common secret forms, treats repository text as untrusted data, and never runs
+on the lookup path. Inspect the source choices and provider-specific budget
+without printing source content with `zsh-git-inlay context --cwd . --provider
+ollama`; see [the context compiler guide](docs/CONTEXT.md).
+
 The runtime socket defaults to `$XDG_RUNTIME_DIR/zsh-git-inlay/daemon.sock`; when that is unavailable, it uses a private XDG cache fallback. `ZSH_GIT_INLAY_RUNTIME_DIR` and `ZSH_GIT_INLAY_CACHE_DIR` are test and troubleshooting overrides.
 
 ## Diagnostics and development
 
-`fingerprint`, `status`, `candidates`, and `daemon stop` are administrative commands, not alternate commit-message workflows:
+`fingerprint`, `context`, `status`, `candidates`, and `daemon stop` are administrative commands, not alternate commit-message workflows:
 
 ```zsh
 zsh-git-inlay fingerprint --cwd .
+zsh-git-inlay context --cwd . --json
+zsh-git-inlay context --cwd . --provider ollama
 zsh-git-inlay status --json
 zsh-git-inlay candidates --cwd .
 zsh-git-inlay suggest --cwd . --buffer 'git commit -m ' --json

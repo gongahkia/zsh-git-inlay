@@ -18,8 +18,10 @@ SHA-256(length-prefix(
   SHA-256(canonical worktree Git directory),
   HEAD OID or "unborn:<symbolic ref>",
   git write-tree OID,
-  "prototype-v1",
-  SHA-256(global relevant config version + repository config version)
+  symbolic branch or "detached",
+  provider and context compiler versions,
+  SHA-256(global relevant config version + repository config version),
+  SHA-256(versioned context identity over the preceding context inputs)
 ))
 ```
 
@@ -47,14 +49,22 @@ Git exposes no non-blocking transaction that can hold an index stable between a 
 
 The default idle timeout is 15 minutes. The daemon exits only when it has been idle and has no jobs, and the next background observe starts it again. It never modifies the Git index or creates a commit.
 
-Provider generation also stays behind the daemon boundary. The selected local
-provider receives bounded staged metadata and returns an untrusted structured
-response. The daemon validates it, converts it to the existing shell-safe
-candidate form, and applies the same pre/post-publication fingerprint checks.
-The strategy and lookup paths do not invoke a provider or wait for inference.
+Provider generation also stays behind the daemon boundary. Before invoking a
+provider, the daemon compiles bounded staged-only context with inspectable
+source and truncation reasons. The context fingerprint is part of the candidate
+identity and the record. Repository-derived content is redacted and marked
+untrusted before provider submission. The selected local provider returns an
+untrusted structured response; the daemon validates it, converts it to the
+existing shell-safe candidate form, and applies the same pre/post-publication
+fingerprint checks. The strategy and lookup paths do not compile context,
+invoke a provider, or wait for inference.
 
 ## Prototype provider and parser
 
-The provider invokes `git diff --cached --name-status -z --find-renames`, bounds the metadata to 64 KiB, and uses only status and path metadata. It creates three ordered, deterministic conventional-style messages for documentation, tests, dependencies, or general staged changes. It does not read staged source contents. Candidate count and length are bounded.
+The deterministic provider invokes `git diff --cached --name-status -z
+--find-renames`, bounds metadata to 64 KiB, and creates three ordered,
+deterministic conventional-style messages. It deliberately ignores compiled
+source context and remains the test oracle. Ollama can instead receive the
+bounded context compiler output described in [CONTEXT.md](CONTEXT.md).
 
 The parser accepts only the stated canonical command forms, including `command git commit`, `-m`, `--message`, `-am`, flags before the message, repeated whitespace, and incomplete quote states. It rejects non-end cursors, `--amend`, `--fixup`, `--squash`, other Git commands, shell operators/substitutions, and completed message arguments. A candidate must extend the user prefix. Empty messages receive single quotes; open single or double quotes receive their matching closing quote; an unquoted typed prefix receives a shell-escaped continuation. Generated candidates are restricted to a conservative printable character set before this composition.

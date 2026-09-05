@@ -22,6 +22,7 @@ import (
 	"github.com/gongahkia/zsh-git-inlay/internal/ipc"
 	"github.com/gongahkia/zsh-git-inlay/internal/managed"
 	"github.com/gongahkia/zsh-git-inlay/internal/provider"
+	"github.com/gongahkia/zsh-git-inlay/internal/repoctx"
 	runtimepath "github.com/gongahkia/zsh-git-inlay/internal/runtime"
 )
 
@@ -43,6 +44,8 @@ func run(arguments []string) error {
 		return configCommand(arguments[1:])
 	case "fingerprint":
 		return fingerprint(arguments[1:])
+	case "context":
+		return contextCommand(arguments[1:])
 	case "observe":
 		return observe(arguments[1:])
 	case "suggest":
@@ -63,7 +66,7 @@ func run(arguments []string) error {
 }
 
 func usage() error {
-	return errors.New("usage: zsh-git-inlay {doctor|config|status|fingerprint|observe|suggest|candidates|evaluate|model|daemon serve|daemon stop}")
+	return errors.New("usage: zsh-git-inlay {doctor|config|status|fingerprint|context|observe|suggest|candidates|evaluate|model|daemon serve|daemon stop}")
 }
 
 func commonFlags(name string) (*flag.FlagSet, *string, *bool) {
@@ -103,6 +106,43 @@ func fingerprint(arguments []string) error {
 		return fmt.Errorf("%s: %s", state.Availability, state.Reason)
 	}
 	fmt.Println(state.Fingerprint)
+	return nil
+}
+
+func contextCommand(arguments []string) error {
+	flags, cwdFlag, jsonOutput := commonFlags("context")
+	providerName := flags.String("provider", "deterministic", "provider preview budget")
+	if err := flags.Parse(arguments); err != nil {
+		return err
+	}
+	cwd, err := resolveCWD(*cwdFlag)
+	if err != nil {
+		return err
+	}
+	snapshotContext, cancel := gitstate.WithTimeout()
+	defer cancel()
+	state, err := gitstate.Snapshot(snapshotContext, cwd)
+	if err != nil {
+		return err
+	}
+	if state.Availability != gitstate.Ready {
+		return fmt.Errorf("%s: %s", state.Availability, state.Reason)
+	}
+	compiled, err := repoctx.Compile(context.Background(), cwd, state, *providerName)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return printJSON(compiled)
+	}
+	fmt.Printf("provider: %s\nstaged_only: %t\ncontext_fingerprint: %s\ntotal_bytes: %d/%d\n", compiled.Provider, compiled.StagedOnly, compiled.ContextFingerprint, compiled.TotalBytes, compiled.Budget.Total)
+	for _, source := range compiled.Sources {
+		status := "excluded"
+		if source.Included {
+			status = "included"
+		}
+		fmt.Printf("%s: %s %d/%d bytes — %s\n", source.Name, status, source.Bytes, source.Limit, source.Reason)
+	}
 	return nil
 }
 

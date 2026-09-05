@@ -87,6 +87,25 @@ func TestExplicitDeterministicFallbackPublishesAfterProviderFailure(t *testing.T
 	}
 }
 
+func TestGenerationReceivesBoundedContextAndRecordsItsIdentity(t *testing.T) {
+	server, _ := testServer(t)
+	repository := daemonRepository(t, "context.go")
+	state := daemonSnapshot(t, repository)
+	capturing := &contextCapturingProvider{}
+	server.provider = capturing
+	server.fallback = nil
+	server.generate(context.Background(), state, repository, 1)
+	if capturing.request.Context == "" || capturing.request.ContextFingerprint != state.ContextFingerprint {
+		t.Fatalf("provider request = %#v state = %#v", capturing.request, state)
+	}
+	server.mu.Lock()
+	record, found := server.cache[state.Fingerprint]
+	server.mu.Unlock()
+	if !found || record.ContextFingerprint != state.ContextFingerprint {
+		t.Fatalf("cached context identity = %#v found=%t", record, found)
+	}
+}
+
 func TestObserveRefreshesChangedProviderConfiguration(t *testing.T) {
 	server, _ := testServer(t)
 	configRoot := t.TempDir()
@@ -117,6 +136,17 @@ func (failingProvider) Metadata() provider.Metadata {
 
 func (failingProvider) Generate(context.Context, provider.Request) (provider.Response, error) {
 	return provider.Response{}, fmt.Errorf("Ollama unavailable")
+}
+
+type contextCapturingProvider struct{ request provider.Request }
+
+func (capture *contextCapturingProvider) Metadata() provider.Metadata {
+	return provider.Deterministic{}.Metadata()
+}
+
+func (capture *contextCapturingProvider) Generate(ctx context.Context, request provider.Request) (provider.Response, error) {
+	capture.request = request
+	return provider.Deterministic{}.Generate(ctx, request)
 }
 
 func TestMalformedSocketRequestIsRejected(t *testing.T) {
@@ -377,11 +407,12 @@ func cacheRecord(seed string, created time.Time) Record {
 
 func cacheRecordFingerprint(fingerprint string, created time.Time) Record {
 	return Record{
-		Fingerprint: fingerprint,
-		Repository:  strings.Repeat("r", 64),
-		Worktree:    strings.Repeat("w", 64),
-		CreatedAt:   created,
-		Provider:    provider.Deterministic{}.Metadata(),
+		Fingerprint:        fingerprint,
+		Repository:         strings.Repeat("r", 64),
+		Worktree:           strings.Repeat("w", 64),
+		ContextFingerprint: strings.Repeat("c", 64),
+		CreatedAt:          created,
+		Provider:           provider.Deterministic{}.Metadata(),
 		Candidates: []candidate.Candidate{
 			{Message: "chore(repo): update staged files", Rank: 0},
 			{Message: "chore(repo): refine staged changes", Rank: 1},

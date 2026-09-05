@@ -158,3 +158,24 @@ must remain off the lookup path.
   for this project, so the install command fails closed without any download.
   This is an external release-infrastructure blocker, not a completed managed
   runtime distribution.
+- 2026-09-05: completed Milestone 4's inspectable context compiler. It uses
+  bounded Git-index and metadata reads with stable path scoring/order; selected
+  staged patch, symbols, root manifests, history, convention, branch, and issue
+  sources have individual and provider-specific aggregate byte budgets. It
+  excludes generated/vendor/lockfile content, redacts common secret forms, and
+  frames every repository-derived field as untrusted data. The daemon compiles
+  it before provider invocation, while the ZLE lookup path remains unchanged.
+  Context identity includes the branch and compiler version in the candidate
+  cache identity. Tests cover deterministic selection, budget enforcement,
+  large repositories/diffs, prompt-injection framing, secret redaction, and
+  unstaged-content exclusion. `context` and `context --json` show only source
+  summaries, never context content. This validates compiler mechanics and
+  bounds; it does not claim arbitrary-secret detection or live Ollama quality.
+  Focused package tests and `go test ./...`, `make test`, and `make lint`
+  passed. Two post-change benchmark runs recorded parser 0.303–0.472 µs/op,
+  exact snapshot 9.58–14.88 ms/op, deterministic generation 1.74–2.74 ms/op,
+  and warm socket lookup 0.104–0.175 ms/op. All remain within the documented
+  1 ms/25 ms/0.25 ms absolute interactive budgets; the shared-host spread is
+  retained as evidence rather than attributed to the compiler. `doctor --json`
+  still found no running daemon or reachable Ollama and made no model request
+  or download.

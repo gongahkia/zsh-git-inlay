@@ -17,7 +17,13 @@ import (
 	"github.com/gongahkia/zsh-git-inlay/internal/config"
 )
 
-const GeneratorVersion = "v1-provider-" + config.ProviderPromptVersion
+const (
+	// ContextVersion changes whenever the deterministic context representation
+	// changes. Snapshot includes it without asking the ZLE lookup path to build
+	// repository context.
+	ContextVersion   = "v1"
+	GeneratorVersion = "v1-provider-" + config.ProviderPromptVersion + "-context-" + ContextVersion
+)
 
 const maxIndexBytes = 64 * 1024 * 1024
 
@@ -32,15 +38,17 @@ const (
 )
 
 type State struct {
-	Availability Availability `json:"availability"`
-	Reason       string       `json:"reason,omitempty"`
-	Root         string       `json:"root,omitempty"`
-	RepoID       string       `json:"repository_id,omitempty"`
-	WorktreeID   string       `json:"worktree_id,omitempty"`
-	Head         string       `json:"head,omitempty"`
-	IndexTree    string       `json:"index_tree,omitempty"`
-	Config       string       `json:"config_version,omitempty"`
-	Fingerprint  string       `json:"fingerprint,omitempty"`
+	Availability       Availability `json:"availability"`
+	Reason             string       `json:"reason,omitempty"`
+	Root               string       `json:"root,omitempty"`
+	RepoID             string       `json:"repository_id,omitempty"`
+	WorktreeID         string       `json:"worktree_id,omitempty"`
+	Head               string       `json:"head,omitempty"`
+	Branch             string       `json:"branch,omitempty"`
+	IndexTree          string       `json:"index_tree,omitempty"`
+	Config             string       `json:"config_version,omitempty"`
+	ContextFingerprint string       `json:"context_fingerprint,omitempty"`
+	Fingerprint        string       `json:"fingerprint,omitempty"`
 }
 
 func (s State) Scope() string { return s.RepoID + ":" + s.WorktreeID }
@@ -88,6 +96,11 @@ func Snapshot(ctx context.Context, cwd string) (State, error) {
 		}
 		state.Head, headTree = headParts[0], headParts[1]
 	}
+	branch, branchErr := git(ctx, cwd, "symbolic-ref", "--short", "-q", "HEAD")
+	if branchErr != nil || branch == "" {
+		branch = "detached"
+	}
+	state.Branch = branch
 	tree, err := writeTree(ctx, cwd, gitDir)
 	if err != nil {
 		unmerged, conflictErr := git(ctx, cwd, "ls-files", "-u")
@@ -122,7 +135,8 @@ func Snapshot(ctx context.Context, cwd string) (State, error) {
 		return State{Availability: Unsupported, Reason: err.Error(), Root: root, RepoID: state.RepoID, WorktreeID: state.WorktreeID}, nil
 	}
 	state.Config = digest(settings.Version + "\x00" + repoConfig)
-	state.Fingerprint = fingerprint(state.RepoID, state.WorktreeID, state.Head, state.IndexTree, GeneratorVersion, state.Config)
+	state.ContextFingerprint = fingerprint("context", ContextVersion, state.RepoID, state.WorktreeID, state.Head, state.IndexTree, state.Branch, state.Config)
+	state.Fingerprint = fingerprint(state.RepoID, state.WorktreeID, state.Head, state.IndexTree, GeneratorVersion, state.Config, state.ContextFingerprint)
 	return state, nil
 }
 

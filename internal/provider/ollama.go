@@ -83,11 +83,15 @@ func (ollama *Ollama) Show(ctx context.Context) (Model, error) {
 }
 
 func (ollama *Ollama) Generate(ctx context.Context, request Request) (Response, error) {
-	changes, err := candidate.StagedChanges(ctx, request.CWD)
-	if err != nil {
-		return Response{}, err
+	var changes []candidate.Change
+	var err error
+	if request.Context == "" {
+		changes, err = candidate.StagedChanges(ctx, request.CWD)
+		if err != nil {
+			return Response{}, err
+		}
 	}
-	text, err := prompt(changes)
+	text, err := prompt(changes, request.Context)
 	if err != nil {
 		return Response{}, err
 	}

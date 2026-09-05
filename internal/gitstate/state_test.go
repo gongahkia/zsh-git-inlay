@@ -110,6 +110,18 @@ func TestSnapshotIncludesProviderConfiguration(t *testing.T) {
 	}
 }
 
+func TestSnapshotIncludesBranchContextIdentity(t *testing.T) {
+	repository := newRepository(t, true)
+	write(t, repository, "file.txt", "staged\n")
+	gitRun(t, repository, "add", "file.txt")
+	main := snapshot(t, repository)
+	gitRun(t, repository, "switch", "-qc", "feature/ABC-123-context")
+	feature := snapshot(t, repository)
+	if main.Branch == feature.Branch || main.ContextFingerprint == feature.ContextFingerprint || main.Fingerprint == feature.Fingerprint {
+		t.Fatalf("branch context did not invalidate identity: main=%#v feature=%#v", main, feature)
+	}
+}
+
 func TestSnapshotIsolatesRepositoriesAndLinkedWorktrees(t *testing.T) {
 	firstRepo := newRepository(t, true)
 	secondRepo := newRepository(t, true)
