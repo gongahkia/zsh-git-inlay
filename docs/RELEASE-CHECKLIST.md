@@ -2,8 +2,7 @@
 
 ## Current classification
 
-**TECHNICALLY READY, EXTERNALLY BLOCKED** is the RC1 recommendation once the
-local final verification in `EXECPLAN-RC1.md` is complete. It is not
+**TECHNICALLY READY, EXTERNALLY BLOCKED** is the RC1 conclusion. It is not
 RELEASE-READY because the project has no selected license, no live local-model
 result, no remote CI execution, no macOS runtime execution, and no maintainer
 visual/usability or independent review. No release is created by this checklist.

@@ -140,11 +140,42 @@ budgets; shared-host variation remains an explicit limitation.
   evaluation claims. The release archive excludes model weights, Ollama,
   autosuggestions, activity/cache data, local evaluation data, and the
   optional Neovim adapter. The repository still has no project license.
+- 2026-09-05: final local verification passed: `make test`, `go test -race
+  ./...`, `make lint`, `make bench`, `make test-integration`, `make test-eval`,
+  `make test-soak`, `make test-install`, and `make fuzz FUZZ_TIME=3s`.
+  Fresh Staticcheck, `govulncheck`, `actionlint`, ShellCheck, `git diff
+  --check`, and `doctor --json` also passed; doctor confirms no daemon, no
+  reachable Ollama runtime/model, and no managed manifest. The final Fedora
+  benchmark run was parser 0.225 us/op, exact snapshot 5.54 ms/op,
+  deterministic generation 1.06 ms/op, and warm socket lookup 0.068 ms/op.
+- 2026-09-05: `make release-snapshot VERSION=verification-rc1
+  DIST=.build/release-rc1` from `7b0329e` produced four archives. All
+  SHA-256 checks passed; each archive has exactly the executable, plugin,
+  README, and changelog. Its SPDX 2.3 SBOM correctly declares
+  `NOASSERTION` for the unselected project license. The extracted Linux
+  archive scan found no workspace path, credential marker, cached activity,
+  evaluation report, or model weight. Nothing was pushed, published, uploaded,
+  or sent to a cloud provider.
+
+## Documentation claim audit
+
+| Capability or claim | RC1 classification |
+| --- | --- |
+| Zsh/autosuggestions frontend, deterministic provider, freshness/isolation/privacy controls, composition, and source/archive lifecycle | Implemented and locally verified |
+| Ollama transport, structured output, cancellation, fallback, and model discovery | Implemented with mocked contract verification; prepared but externally unverified live runtime/model behavior |
+| OpenAI transport and consent/revocation boundaries | Implemented with mocked contract verification; no credential, consent, or live request authorized |
+| Managed runtime/model acquisition | Prepared and mock-tested; deliberately blocked without authenticated distribution authority |
+| Neovim activity producer | Implemented and locally headless-tested; optional source-tree integration, not a release-archive capability |
+| Linux runtime and release archive | Implemented and locally verified on Fedora 43 |
+| macOS runtime and GitHub Actions result | Prepared but externally unverified; cross-compilation and local workflow lint are not runtime/remote evidence |
+| Local-model quality/default selection, human usability, independent security review | Prepared or deliberately not claimed; no supporting live/human/independent evidence |
 
 ## Release recommendation
 
-Pending the remaining local gates, the current expected classification is
-**TECHNICALLY READY, EXTERNALLY BLOCKED**, not RELEASE-READY: a maintainer
-license decision is mandatory for redistribution, and live-model, remote-CI,
-macOS-runtime, and visual-terminal evidence are absent. This is a provisional
-assessment, not the final RC1 decision.
+**TECHNICALLY READY, EXTERNALLY BLOCKED.** Local correctness, reliability,
+static/supply-chain, packaging, and deterministic-provider gates pass. This is
+not RELEASE-READY because a maintainer license decision is mandatory for
+redistribution and live local-model, remote-CI, macOS-runtime, human visual/
+usability, and independent-review evidence are absent. The deterministic
+provider remains the selected default; no local model is selected. The exact
+maintainer actions are in `RELEASE-CHECKLIST.md`.
