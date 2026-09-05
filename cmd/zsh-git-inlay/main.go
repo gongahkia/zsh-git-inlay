@@ -32,6 +32,11 @@ import (
 	runtimepath "github.com/gongahkia/zsh-git-inlay/internal/runtime"
 )
 
+var (
+	version = "dev"
+	commit  = "unknown"
+)
+
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "zsh-git-inlay:", err)
@@ -44,6 +49,8 @@ func run(arguments []string) error {
 		return usage()
 	}
 	switch arguments[0] {
+	case "version":
+		return versionCommand(arguments[1:])
 	case "doctor":
 		return doctor(arguments[1:])
 	case "config":
@@ -84,7 +91,22 @@ func run(arguments []string) error {
 }
 
 func usage() error {
-	return errors.New("usage: zsh-git-inlay {doctor|config|status|fingerprint|context|observe|suggest|candidates|explain|evaluate|model|permissions|cloud|compose|activity|learning|daemon serve|daemon stop}")
+	return errors.New("usage: zsh-git-inlay {version|doctor|config|status|fingerprint|context|observe|suggest|candidates|explain|evaluate|model|permissions|cloud|compose|activity|learning|daemon serve|daemon stop}")
+}
+
+func versionCommand(arguments []string) error {
+	flags := flag.NewFlagSet("version", flag.ContinueOnError)
+	flags.SetOutput(ioDiscard{})
+	jsonOutput := flags.Bool("json", false, "emit JSON")
+	if err := flags.Parse(arguments); err != nil || flags.NArg() != 0 {
+		return errors.New("usage: zsh-git-inlay version [--json]")
+	}
+	report := map[string]string{"version": version, "commit": commit, "go": runtime.Version()}
+	if *jsonOutput {
+		return printJSON(report)
+	}
+	fmt.Printf("%s (%s)\n", version, commit)
+	return nil
 }
 
 func commonFlags(name string) (*flag.FlagSet, *string, *bool) {

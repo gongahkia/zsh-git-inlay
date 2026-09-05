@@ -1,5 +1,6 @@
 AGENTS.md
 .build/
+/dist/
 /evaluation-private/
 *.zsh-git-inlay-evaluation.json
 *.zsh-git-inlay-evaluation.md

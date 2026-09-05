@@ -36,7 +36,8 @@ wait_ready() {
 
 command "$ZSH_GIT_INLAY_BIN" observe --cwd "$repo" >/dev/null
 wait_ready
-[[ -S "$ZSH_GIT_INLAY_RUNTIME_DIR/daemon.sock" && "$(command stat -c '%a' "$ZSH_GIT_INLAY_RUNTIME_DIR/daemon.sock")" == 600 ]] || { print -u2 -- 'daemon socket was not private'; exit 1 }
+socket_mode=$(command stat -c '%a' "$ZSH_GIT_INLAY_RUNTIME_DIR/daemon.sock" 2>/dev/null || command stat -f '%Lp' "$ZSH_GIT_INLAY_RUNTIME_DIR/daemon.sock")
+[[ -S "$ZSH_GIT_INLAY_RUNTIME_DIR/daemon.sock" && $socket_mode == 600 ]] || { print -u2 -- 'daemon socket was not private'; exit 1 }
 
 source "$autosuggestions"
 typeset -ga ZSH_AUTOSUGGEST_STRATEGY=(history)

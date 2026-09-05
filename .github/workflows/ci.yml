@@ -1,0 +1,52 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.7'
+          cache: false
+      - name: install Linux test prerequisites
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes zsh zsh-autosuggestions
+      - name: install macOS test prerequisites
+        if: runner.os == 'macOS'
+        run: |
+          brew install zsh zsh-autosuggestions
+          echo "ZSH_AUTOSUGGESTIONS_SOURCE=$(brew --prefix zsh-autosuggestions)/share/zsh-autosuggestions/zsh-autosuggestions.zsh" >> "$GITHUB_ENV"
+      - run: make test lint
+
+  snapshot:
+    name: release snapshot
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.7'
+          cache: false
+      - run: make release-snapshot VERSION=ci-${{ github.sha }} DIST=dist/ci-snapshot
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-snapshot-${{ github.sha }}
+          path: dist/ci-snapshot
+          if-no-files-found: error
+          retention-days: 7

@@ -345,3 +345,31 @@ must remain off the lookup path.
   socket lookup 0.067 ms/op, within the 1 ms/25 ms/0.25 ms budgets. `doctor
   --json` found no running daemon or reachable Ollama; no model, cloud, or paid
   request occurred.
+- 2026-09-05: completed Milestone 13's local release-engineering preparation.
+  `version --json` exposes linker-embedded version and commit metadata; normal
+  builds use `-trimpath`, disabled VCS metadata, and a fixed build ID. A
+  source-only installer atomically replaces only the named binary/plugin files
+  and refuses root prefixes. Its paired uninstaller stops the daemon when
+  possible, removes only those installed files by default, and requires an
+  explicit purge flag before deleting exact product-named standard XDG
+  directories. `release-snapshot` refuses an existing output directory,
+  cross-compiles Linux/Darwin amd64/arm64 archives, normalizes archive inputs,
+  emits SHA-256 checksums and a deterministic SPDX 2.3 SBOM, and neither tags,
+  publishes, nor downloads anything. The install lifecycle test covers clean
+  install, rerun upgrade, root-prefix refusal, clean uninstall, explicit
+  purge boundaries, release-output refusal, checksums, all four archives,
+  embedded packaged metadata, and byte-identical dual snapshots. It now runs
+  under `make test`; lint checks all added shell files. `go test -race
+  ./cmd/zsh-git-inlay`, `make test`, `make lint`, `make test-install`, and a
+  direct `make release-snapshot` passed on Fedora. Two post-change benchmark
+  runs recorded parser 0.307–0.561 µs/op, exact snapshot 7.66–14.53 ms/op,
+  deterministic generation 1.46–2.39 ms/op, and warm lookup 0.094–0.193
+  ms/op: all meet the 1 ms/25 ms/0.25 ms absolute budgets but exceed the M12
+  relative comparison threshold. [Inference] Broad variation across unchanged
+  benchmark packages on this shared host is the strongest available
+  explanation; release code is outside the interactive path. `doctor --json`
+  found no daemon or reachable Ollama, and no model/cloud request occurred.
+  The GitHub Actions Linux/macOS workflow is checked in but has not run from
+  this checkout, and macOS runtime validation remains external. The repository
+  has no license file, so artifact redistribution and publication remain
+  explicitly blocked pending maintainer choice rather than being inferred.

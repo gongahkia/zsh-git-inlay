@@ -47,6 +47,17 @@ func TestContextCommandReportsSummaryWithoutSourceContent(t *testing.T) {
 	}
 }
 
+func TestVersionCommandReportsEmbeddedBuildMetadata(t *testing.T) {
+	output, err := captureCommandOutput(func() error { return run([]string{"version", "--json"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	var report map[string]string
+	if err := json.Unmarshal([]byte(output), &report); err != nil || report["version"] == "" || report["commit"] == "" || report["go"] == "" {
+		t.Fatalf("version report=%q decoded=%#v err=%v", output, report, err)
+	}
+}
+
 func TestExplainCommandReportsGroundingForPreparedCandidate(t *testing.T) {
 	repository := t.TempDir()
 	runtimeDirectory, cacheDirectory := filepath.Join(t.TempDir(), "runtime"), filepath.Join(t.TempDir(), "cache")

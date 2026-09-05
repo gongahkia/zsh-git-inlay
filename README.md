@@ -17,10 +17,11 @@ Requirements are Git, Zsh 5.0.8 or later, Go 1.26 or later to build, and `zsh-au
 git clone https://github.com/gongahkia/zsh-git-inlay.git
 cd zsh-git-inlay
 make build
-install -Dm755 .build/zsh-git-inlay "$HOME/.local/bin/zsh-git-inlay"
+sh scripts/install.sh --source "$PWD"
 ```
 
-Add the following in `.zshrc`, after the line that sources `zsh-autosuggestions`:
+The installer prints the following `.zshrc` lines; add them after the line that
+sources `zsh-autosuggestions`:
 
 ```zsh
 path=("$HOME/.local/bin" $path)
@@ -30,6 +31,7 @@ source /absolute/path/to/zsh-git-inlay/zsh-git-inlay.plugin.zsh
 The plugin prints an actionable diagnostic and stays inactive when autosuggestions has not been loaded. Check the local setup with:
 
 ```zsh
+zsh-git-inlay version --json
 zsh-git-inlay doctor
 ```
 
@@ -183,11 +185,9 @@ The integration test uses a real Zsh process and the installed autosuggestions i
 Remove the source line from `.zshrc`, then in an active shell run `zsh_git_inlay_unload` before reloading the shell. Stop the daemon and remove only files you installed:
 
 ```zsh
-zsh-git-inlay daemon stop
-rm "$HOME/.local/bin/zsh-git-inlay"
-# remove the cloned plugin directory if it is no longer needed
+sh scripts/uninstall.sh --prefix "$HOME/.local"
 ```
 
 Optional cached candidates are under `$XDG_CACHE_HOME/zsh-git-inlay` (or `~/.cache/zsh-git-inlay`). Removing that directory is recoverable only from backups; it contains no repository content, only candidate metadata records.
 
-Further design, security, and roadmap details are in [PRODUCT.md](docs/PRODUCT.md), [ARCHITECTURE.md](docs/ARCHITECTURE.md), [ACTIVITY.md](docs/ACTIVITY.md), [CLOUD.md](docs/CLOUD.md), [COMPOSE.md](docs/COMPOSE.md), [LEARNING.md](docs/LEARNING.md), [NEOVIM.md](docs/NEOVIM.md), and [THREAT-MODEL.md](docs/THREAT-MODEL.md).
+Further design, security, installation, and roadmap details are in [PRODUCT.md](docs/PRODUCT.md), [ARCHITECTURE.md](docs/ARCHITECTURE.md), [INSTALLATION.md](docs/INSTALLATION.md), [ACTIVITY.md](docs/ACTIVITY.md), [CLOUD.md](docs/CLOUD.md), [COMPOSE.md](docs/COMPOSE.md), [LEARNING.md](docs/LEARNING.md), [NEOVIM.md](docs/NEOVIM.md), and [THREAT-MODEL.md](docs/THREAT-MODEL.md).
