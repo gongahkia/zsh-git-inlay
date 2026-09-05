@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gongahkia/zsh-git-inlay/internal/activity"
 	"github.com/gongahkia/zsh-git-inlay/internal/command"
 	"github.com/gongahkia/zsh-git-inlay/internal/config"
 	"github.com/gongahkia/zsh-git-inlay/internal/daemon"
@@ -61,6 +62,10 @@ func run(arguments []string) error {
 		return evaluateCommand(arguments[1:])
 	case "model":
 		return modelCommand(arguments[1:])
+	case "permissions":
+		return permissionsCommand(arguments[1:])
+	case "activity":
+		return activityCommand(arguments[1:])
 	case "daemon":
 		return daemonCommand(arguments[1:])
 	default:
@@ -69,7 +74,7 @@ func run(arguments []string) error {
 }
 
 func usage() error {
-	return errors.New("usage: zsh-git-inlay {doctor|config|status|fingerprint|context|observe|suggest|candidates|explain|evaluate|model|daemon serve|daemon stop}")
+	return errors.New("usage: zsh-git-inlay {doctor|config|status|fingerprint|context|observe|suggest|candidates|explain|evaluate|model|permissions|activity|daemon serve|daemon stop}")
 }
 
 func commonFlags(name string) (*flag.FlagSet, *string, *bool) {
@@ -460,6 +465,79 @@ func modelCommand(arguments []string) error {
 	default:
 		return usage()
 	}
+}
+
+func permissionsCommand(arguments []string) error {
+	directory, err := runtimepath.DataDir()
+	if err != nil {
+		return err
+	}
+	path := activity.PermissionsPath(directory)
+	permissions, err := activity.LoadPermissions(path)
+	if err != nil && !(len(arguments) == 2 && arguments[0] == "revoke" && arguments[1] == "activity") {
+		return err
+	}
+	if err != nil {
+		permissions = activity.Permissions{}
+	}
+	if len(arguments) == 0 {
+		return printJSON(permissions)
+	}
+	if len(arguments) != 2 || arguments[1] != "activity" || (arguments[0] != "enable" && arguments[0] != "revoke") {
+		return errors.New("usage: zsh-git-inlay permissions {enable activity|revoke activity}")
+	}
+	permissions.Activity = arguments[0] == "enable"
+	if err := activity.SavePermissions(path, permissions); err != nil {
+		return err
+	}
+	return printJSON(permissions)
+}
+
+func activityCommand(arguments []string) error {
+	if len(arguments) == 0 || (arguments[0] != "inspect" && arguments[0] != "clear") {
+		return errors.New("usage: zsh-git-inlay activity {inspect|clear} [--cwd <directory>] [--json]")
+	}
+	flags, cwdFlag, jsonOutput := commonFlags("activity " + arguments[0])
+	if err := flags.Parse(arguments[1:]); err != nil {
+		return err
+	}
+	cwd, err := resolveCWD(*cwdFlag)
+	if err != nil {
+		return err
+	}
+	operation := "activity_" + arguments[0]
+	reply, err := call(ipc.Request{Version: ipc.Version, Operation: operation, CWD: cwd}, 100*time.Millisecond)
+	if err != nil {
+		return fmt.Errorf("daemon unavailable: %w", err)
+	}
+	if arguments[0] == "clear" {
+		if reply.Status != "cleared" {
+			return fmt.Errorf("activity clear %s: %s", reply.Status, reply.Error)
+		}
+		if *jsonOutput {
+			return printJSON(map[string]string{"status": "cleared"})
+		}
+		fmt.Println("cleared")
+		return nil
+	}
+	if reply.Status != "ready" {
+		return fmt.Errorf("activity inspect %s: %s", reply.Status, reply.Error)
+	}
+	var inspection activity.Inspection
+	if err := json.Unmarshal(reply.Payload, &inspection); err != nil {
+		return fmt.Errorf("decode activity inspection: %w", err)
+	}
+	if *jsonOutput {
+		return printJSON(inspection)
+	}
+	fmt.Printf("enabled: %t\nselected: %d\n", inspection.Enabled, len(inspection.Selected))
+	for _, event := range inspection.Selected {
+		fmt.Printf("%s %s %s %s\n", event.Timestamp.Format(time.RFC3339), event.Source, event.Kind, event.Sensitivity)
+	}
+	for reason, count := range inspection.Excluded {
+		fmt.Printf("excluded %s: %d\n", reason, count)
+	}
+	return nil
 }
 
 func daemonCommand(arguments []string) error {

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gongahkia/zsh-git-inlay/internal/activity"
 	"github.com/gongahkia/zsh-git-inlay/internal/gitstate"
 )
 
@@ -121,6 +122,29 @@ func TestRedactionHandlesTruncatedSecretPrefixes(t *testing.T) {
 		if count != 1 || redacted == value || strings.Contains(redacted, "partial") {
 			t.Fatalf("truncated secret prefix was not redacted: input=%q output=%q count=%d", value, redacted, count)
 		}
+	}
+}
+
+func TestCompileWithActivityUsesOnlyBoundedAllowlistedSignals(t *testing.T) {
+	repository := contextRepository(t, "main")
+	writeContextFile(t, repository, "file.go", "package file\n")
+	contextGit(t, repository, "add", "file.go")
+	compiled, err := CompileWithActivity(context.Background(), repository, contextSnapshot(t, repository), "deterministic", []activity.Signal{
+		{Kind: "test.completed", Count: 1},
+		{Kind: "test.completed", Count: 4096},
+		{Kind: "not-an-event", Count: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var source Source
+	for _, value := range compiled.Sources {
+		if value.Name == "activity_signals" {
+			source = value
+		}
+	}
+	if !source.Included || source.Bytes > compiled.Budget.Activity || !strings.Contains(compiled.Prompt(), "test.completed\t4096") || strings.Contains(compiled.Prompt(), "not-an-event") {
+		t.Fatalf("activity source = %#v prompt=%q", source, compiled.Prompt())
 	}
 }
 

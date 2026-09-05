@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gongahkia/zsh-git-inlay/internal/activity"
 	"github.com/gongahkia/zsh-git-inlay/internal/candidate"
 	"github.com/gongahkia/zsh-git-inlay/internal/config"
 	"github.com/gongahkia/zsh-git-inlay/internal/gitstate"
@@ -153,6 +154,68 @@ func TestObserveRefreshesChangedProviderConfiguration(t *testing.T) {
 	}
 	if policy := server.policy(); policy != "quiet" {
 		t.Fatalf("grounding policy refresh = %q", policy)
+	}
+}
+
+func TestActivitySocketRequiresConsentAndMatchingRepositoryScope(t *testing.T) {
+	server, socket := testServer(t)
+	permissions := activity.Permissions{}
+	server.activity = activity.New(activity.DefaultSettings(), func() (activity.Permissions, error) { return permissions, nil })
+	repository := daemonRepository(t, "activity.go")
+	state := daemonSnapshot(t, repository)
+	event := activity.Event{Schema: activity.SchemaVersion, Repository: state.RepoID, Worktree: state.WorktreeID, Source: "shell", Kind: "git.index_changed", Timestamp: time.Now().UTC(), Sensitivity: activity.Private}
+	if reply := daemonCall(t, socket, ipc.Request{Version: ipc.Version, Operation: "event", CWD: repository, Event: &event}); reply.Status != "rejected" {
+		t.Fatalf("pre-consent event = %#v", reply)
+	}
+	if reply := daemonCall(t, socket, ipc.Request{Version: ipc.Version, Operation: "activity_inspect", CWD: repository}); reply.Status != "ready" {
+		t.Fatalf("pre-consent inspection = %#v", reply)
+	} else {
+		var inspection activity.Inspection
+		if err := json.Unmarshal(reply.Payload, &inspection); err != nil || inspection.Enabled || len(inspection.Selected) != 0 {
+			t.Fatalf("pre-consent inspection = %#v err=%v", inspection, err)
+		}
+	}
+	permissions.Activity = true
+	if reply := daemonCall(t, socket, ipc.Request{Version: ipc.Version, Operation: "event", CWD: repository, Event: &event}); reply.Status != "accepted" {
+		t.Fatalf("consented event = %#v", reply)
+	}
+	wrongScope := event
+	wrongScope.Repository = strings.Repeat("f", 64)
+	if reply := daemonCall(t, socket, ipc.Request{Version: ipc.Version, Operation: "event", CWD: repository, Event: &wrongScope}); reply.Status != "rejected" {
+		t.Fatalf("cross-scope event = %#v", reply)
+	}
+	if reply := daemonCall(t, socket, ipc.Request{Version: ipc.Version, Operation: "activity_inspect", CWD: repository}); reply.Status != "ready" {
+		t.Fatalf("inspection = %#v", reply)
+	} else {
+		var inspection activity.Inspection
+		if err := json.Unmarshal(reply.Payload, &inspection); err != nil || !inspection.Enabled || len(inspection.Selected) != 1 {
+			t.Fatalf("inspection = %#v err=%v", inspection, err)
+		}
+	}
+}
+
+func TestActivitySignalsReachContextAndRevocationInvalidatesLookup(t *testing.T) {
+	server, socket := testServer(t)
+	permissions := activity.Permissions{Activity: true}
+	server.activity = activity.New(activity.DefaultSettings(), func() (activity.Permissions, error) { return permissions, nil })
+	repository := daemonRepository(t, "activity.go")
+	state := daemonSnapshot(t, repository)
+	event := activity.Event{Schema: activity.SchemaVersion, Repository: state.RepoID, Worktree: state.WorktreeID, Source: "shell", Kind: "test.completed", Timestamp: time.Now().UTC(), Sensitivity: activity.Private, Data: map[string]string{"token": "ghp_not_retained"}}
+	if reply := daemonCall(t, socket, ipc.Request{Version: ipc.Version, Operation: "event", CWD: repository, Event: &event}); reply.Status != "accepted" {
+		t.Fatalf("event = %#v", reply)
+	}
+	capturing := &contextCapturingProvider{}
+	server.provider, server.fallback = capturing, nil
+	server.generate(context.Background(), state, repository, 1)
+	if !strings.Contains(capturing.request.Context, "activity_signals") || !strings.Contains(capturing.request.Context, "test.completed") || strings.Contains(capturing.request.Context, "ghp_not_retained") {
+		t.Fatalf("activity context = %q", capturing.request.Context)
+	}
+	if reply := daemonCall(t, socket, ipc.Request{Version: ipc.Version, Operation: "lookup", Fingerprint: state.Fingerprint, Repository: state.RepoID, Worktree: state.WorktreeID}); reply.Status != "ready" {
+		t.Fatalf("activity lookup = %#v", reply)
+	}
+	permissions.Activity = false
+	if reply := daemonCall(t, socket, ipc.Request{Version: ipc.Version, Operation: "lookup", Fingerprint: state.Fingerprint, Repository: state.RepoID, Worktree: state.WorktreeID}); reply.Status != "activity_stale" {
+		t.Fatalf("revoked activity lookup = %#v", reply)
 	}
 }
 

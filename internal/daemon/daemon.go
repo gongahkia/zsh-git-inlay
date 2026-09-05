@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gongahkia/zsh-git-inlay/internal/activity"
 	"github.com/gongahkia/zsh-git-inlay/internal/candidate"
 	"github.com/gongahkia/zsh-git-inlay/internal/config"
 	"github.com/gongahkia/zsh-git-inlay/internal/gitstate"
@@ -35,6 +36,7 @@ type Record struct {
 	Provider           provider.Metadata       `json:"provider"`
 	Policy             config.RepositoryPolicy `json:"policy"`
 	Grounding          []grounding.Result      `json:"grounding,omitempty"`
+	Activity           activity.Provenance     `json:"activity,omitempty"`
 }
 
 type Status struct {
@@ -79,6 +81,7 @@ type Server struct {
 	fallback        provider.Provider
 	providerVersion string
 	ambiguityPolicy string
+	activity        *activity.Store
 	stop            chan struct{}
 	stopped         sync.Once
 }
@@ -95,11 +98,21 @@ type job struct {
 }
 
 func New(settings config.Settings, socket, cacheDir string) *Server {
+	return newServer(settings, socket, cacheDir, activity.New(activitySettings(settings), func() (activity.Permissions, error) {
+		return activity.Permissions{}, nil
+	}))
+}
+
+func newServer(settings config.Settings, socket, cacheDir string, events *activity.Store) *Server {
 	selected, err := provider.New(settings)
 	if err != nil {
 		selected = provider.Deterministic{}
 	}
-	return &Server{settings: settings, socket: socket, cacheDir: cacheDir, cache: map[string]Record{}, active: map[string]active{}, jobs: map[string]job{}, sem: make(chan struct{}, settings.MaxGenerationJobs), lastUse: time.Now(), cacheStatus: CacheStatus{MaxEntries: settings.CacheMaxRecords, MaxBytes: settings.CacheMaxBytes}, provider: selected, fallback: provider.Fallback(settings), providerVersion: settings.Version, ambiguityPolicy: settings.GroundingPolicy, stop: make(chan struct{})}
+	return &Server{settings: settings, socket: socket, cacheDir: cacheDir, cache: map[string]Record{}, active: map[string]active{}, jobs: map[string]job{}, sem: make(chan struct{}, settings.MaxGenerationJobs), lastUse: time.Now(), cacheStatus: CacheStatus{MaxEntries: settings.CacheMaxRecords, MaxBytes: settings.CacheMaxBytes}, provider: selected, fallback: provider.Fallback(settings), providerVersion: settings.Version, ambiguityPolicy: settings.GroundingPolicy, activity: events, stop: make(chan struct{})}
+}
+
+func activitySettings(settings config.Settings) activity.Settings {
+	return activity.Settings{Retention: settings.ActivityRetention, MaxEvents: settings.ActivityMaxEvents, MaxScopes: settings.MaxRepositories}
 }
 
 func Serve(ctx context.Context, settings config.Settings, initialCWD string) error {
@@ -128,7 +141,18 @@ func Serve(ctx context.Context, settings config.Settings, initialCWD string) err
 		listener.Close()
 		return err
 	}
-	server := New(settings, socket, cacheDir)
+	dataDir, dataErr := runtime.DataDir()
+	permissionsPath := ""
+	if dataErr == nil {
+		permissionsPath = activity.PermissionsPath(dataDir)
+	}
+	events := activity.New(activitySettings(settings), func() (activity.Permissions, error) {
+		if permissionsPath == "" {
+			return activity.Permissions{}, fmt.Errorf("activity permission storage is unavailable")
+		}
+		return activity.LoadPermissions(permissionsPath)
+	})
+	server := newServer(settings, socket, cacheDir, events)
 	if err := server.collectCache(); err != nil {
 		listener.Close()
 		return err
@@ -194,6 +218,12 @@ func (server *Server) handle(connection net.Conn) {
 		reply = server.lookup(request)
 	case "status":
 		reply = server.status()
+	case "event":
+		reply = server.ingestActivity(request)
+	case "activity_inspect":
+		reply = server.inspectActivity(request.CWD)
+	case "activity_clear":
+		reply = server.clearActivity(request.CWD)
 	case "stop":
 		reply = ipc.Reply{Version: ipc.Version, Status: "stopping"}
 		go server.Close()
@@ -219,6 +249,7 @@ func (server *Server) observe(cwd string) ipc.Reply {
 	if state.Availability != gitstate.Ready {
 		return server.noteObserve(ipc.Reply{Version: ipc.Version, Status: string(state.Availability), Error: state.Reason})
 	}
+	activityProvenance := server.activity.Provenance(state.RepoID, state.WorktreeID)
 	cached, cacheErr := server.load(state.Fingerprint)
 	server.mu.Lock()
 	server.evictLocked()
@@ -230,12 +261,12 @@ func (server *Server) observe(cwd string) ipc.Reply {
 		}
 	}
 	server.active[state.Scope()] = active{cwd: cwd, seen: time.Now(), fingerprint: state.Fingerprint}
-	if record, ready := server.cache[state.Fingerprint]; ready && !server.expired(record) {
+	if record, ready := server.cache[state.Fingerprint]; ready && !server.expired(record) && matchesActivity(record, activityProvenance) {
 		server.mu.Unlock()
 		return ipc.Reply{Version: ipc.Version, Status: "ready"}
 	}
 	delete(server.cache, state.Fingerprint)
-	if cacheErr == nil && cached.Repository == state.RepoID && cached.Worktree == state.WorktreeID {
+	if cacheErr == nil && cached.Repository == state.RepoID && cached.Worktree == state.WorktreeID && matchesActivity(cached, activityProvenance) {
 		server.cache[state.Fingerprint] = cached
 		server.mu.Unlock()
 		return ipc.Reply{Version: ipc.Version, Status: "ready"}
@@ -261,7 +292,8 @@ func (server *Server) generate(ctx context.Context, expected gitstate.State, cwd
 		server.finish(expected.Fingerprint, jobID)
 		return
 	}
-	compiled, compileErr := server.compileContext(ctx, cwd, expected)
+	activityProvenance := server.activity.Provenance(expected.RepoID, expected.WorktreeID)
+	compiled, compileErr := server.compileContext(ctx, cwd, expected, activityProvenance.Signals)
 	if compileErr != nil {
 		server.finish(expected.Fingerprint, jobID)
 		return
@@ -293,7 +325,7 @@ func (server *Server) generate(ctx context.Context, expected gitstate.State, cwd
 		current, checkErr := gitstate.Snapshot(checkContext, cwd)
 		cancel()
 		if checkErr == nil && current.Availability == gitstate.Ready && current.Fingerprint == expected.Fingerprint {
-			record := Record{Fingerprint: expected.Fingerprint, Repository: expected.RepoID, Worktree: expected.WorktreeID, ContextFingerprint: expected.ContextFingerprint, Candidates: candidates, CreatedAt: time.Now().UTC(), Provider: generated.Metadata, Policy: repositoryPolicy, Grounding: reports}
+			record := Record{Fingerprint: expected.Fingerprint, Repository: expected.RepoID, Worktree: expected.WorktreeID, ContextFingerprint: expected.ContextFingerprint, Candidates: candidates, CreatedAt: time.Now().UTC(), Provider: generated.Metadata, Policy: repositoryPolicy, Grounding: reports, Activity: activityProvenance}
 			if server.store(record) == nil {
 				finalContext, finalCancel := gitstate.WithTimeout()
 				final, finalErr := gitstate.Snapshot(finalContext, cwd)
@@ -327,11 +359,11 @@ func rankCandidates(response provider.Response, compiled repoctx.Compiled, polic
 	return rankedValues, rankedReports, nil
 }
 
-func (server *Server) compileContext(ctx context.Context, cwd string, state gitstate.State) (repoctx.Compiled, error) {
+func (server *Server) compileContext(ctx context.Context, cwd string, state gitstate.State, signals []activity.Signal) (repoctx.Compiled, error) {
 	server.providerMu.RLock()
 	name := server.provider.Metadata().Name
 	server.providerMu.RUnlock()
-	return repoctx.Compile(ctx, cwd, state, name)
+	return repoctx.CompileWithActivity(ctx, cwd, state, name, signals)
 }
 
 func (server *Server) generateCandidates(ctx context.Context, cwd string, compiled repoctx.Compiled) (provider.Response, error) {
@@ -367,6 +399,7 @@ func (server *Server) refreshProvider() error {
 	if err != nil {
 		return err
 	}
+	server.activity.Configure(activitySettings(settings))
 	server.providerMu.RLock()
 	current := server.providerVersion
 	server.providerMu.RUnlock()
@@ -424,11 +457,78 @@ func (server *Server) lookup(request ipc.Request) ipc.Reply {
 	if record.Repository != request.Repository || record.Worktree != request.Worktree {
 		return ipc.Reply{Version: ipc.Version, Status: "stale"}
 	}
+	if !matchesActivity(record, server.activity.Provenance(request.Repository, request.Worktree)) {
+		return ipc.Reply{Version: ipc.Version, Status: "activity_stale"}
+	}
 	payload, err := json.Marshal(record)
 	if err != nil {
 		return ipc.Reply{Version: ipc.Version, Status: "error", Error: err.Error()}
 	}
 	return ipc.Reply{Version: ipc.Version, Status: "ready", Payload: payload}
+}
+
+func matchesActivity(record Record, current activity.Provenance) bool {
+	return record.Activity.Fingerprint == current.Fingerprint
+}
+
+func (server *Server) ingestActivity(request ipc.Request) ipc.Reply {
+	if request.Event == nil {
+		return ipc.Reply{Version: ipc.Version, Status: "malformed", Error: "missing event"}
+	}
+	state, reply := activityScope(request.CWD)
+	if reply != nil {
+		return *reply
+	}
+	if request.Event.Repository != state.RepoID || request.Event.Worktree != state.WorktreeID {
+		return ipc.Reply{Version: ipc.Version, Status: "rejected", Error: "event scope does not match working directory"}
+	}
+	decision := server.activity.Ingest(*request.Event)
+	payload, _ := json.Marshal(decision)
+	status := "rejected"
+	if decision.Accepted {
+		status = "accepted"
+	}
+	return ipc.Reply{Version: ipc.Version, Status: status, Payload: payload}
+}
+
+func (server *Server) inspectActivity(cwd string) ipc.Reply {
+	state, reply := activityScope(cwd)
+	if reply != nil {
+		return *reply
+	}
+	payload, err := json.Marshal(server.activity.Inspect(state.RepoID, state.WorktreeID))
+	if err != nil {
+		return ipc.Reply{Version: ipc.Version, Status: "error", Error: err.Error()}
+	}
+	return ipc.Reply{Version: ipc.Version, Status: "ready", Payload: payload}
+}
+
+func (server *Server) clearActivity(cwd string) ipc.Reply {
+	state, reply := activityScope(cwd)
+	if reply != nil {
+		return *reply
+	}
+	server.activity.Clear(state.RepoID, state.WorktreeID)
+	return ipc.Reply{Version: ipc.Version, Status: "cleared"}
+}
+
+func activityScope(cwd string) (gitstate.State, *ipc.Reply) {
+	if cwd == "" || len(cwd) > 4096 {
+		reply := ipc.Reply{Version: ipc.Version, Status: "malformed", Error: "invalid working directory"}
+		return gitstate.State{}, &reply
+	}
+	context, cancel := gitstate.WithTimeout()
+	defer cancel()
+	state, err := gitstate.Snapshot(context, cwd)
+	if err != nil {
+		reply := ipc.Reply{Version: ipc.Version, Status: "error", Error: err.Error()}
+		return gitstate.State{}, &reply
+	}
+	if state.Root == "" || state.RepoID == "" || state.WorktreeID == "" {
+		reply := ipc.Reply{Version: ipc.Version, Status: string(state.Availability), Error: state.Reason}
+		return gitstate.State{}, &reply
+	}
+	return state, nil
 }
 
 func (server *Server) status() ipc.Reply {

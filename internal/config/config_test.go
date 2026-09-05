@@ -13,7 +13,7 @@ func TestLoadValidatesGlobalSettings(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte("[daemon]\nidle_timeout = \"50ms\"\nmax_active_repositories = 3\nmax_generation_concurrency = 1\n[cache]\nmax_records = 4\nmax_bytes = 65536\nmax_age = \"1h\"\n[provider]\nname = \"ollama\"\nmodel = \"qwen2.5-coder:0.5b\"\ntimeout = \"9s\"\nfallback = \"none\"\n[grounding]\nambiguity = \"quiet\"\n[zsh]\ncycle_keybinding = \"^Xh\"\n[diagnostics]\nverbose = true\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("[daemon]\nidle_timeout = \"50ms\"\nmax_active_repositories = 3\nmax_generation_concurrency = 1\n[cache]\nmax_records = 4\nmax_bytes = 65536\nmax_age = \"1h\"\n[provider]\nname = \"ollama\"\nmodel = \"qwen2.5-coder:0.5b\"\ntimeout = \"9s\"\nfallback = \"none\"\n[grounding]\nambiguity = \"quiet\"\n[activity]\nretention = \"2h\"\nmax_events = 4\n[zsh]\ncycle_keybinding = \"^Xh\"\n[diagnostics]\nverbose = true\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("XDG_CONFIG_HOME", root)
@@ -21,7 +21,7 @@ func TestLoadValidatesGlobalSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if settings.IdleTimeout != 50*time.Millisecond || settings.MaxRepositories != 3 || settings.MaxGenerationJobs != 1 || settings.CacheMaxRecords != 4 || settings.CacheMaxBytes != 65536 || settings.CacheMaxAge != time.Hour || settings.Provider != "ollama" || settings.ProviderModel != "qwen2.5-coder:0.5b" || settings.ProviderTimeout != 9*time.Second || settings.ProviderFallback != "none" || settings.GroundingPolicy != "quiet" || settings.CycleKeybinding != "^Xh" || !settings.Verbose || settings.Version == "default" {
+	if settings.IdleTimeout != 50*time.Millisecond || settings.MaxRepositories != 3 || settings.MaxGenerationJobs != 1 || settings.CacheMaxRecords != 4 || settings.CacheMaxBytes != 65536 || settings.CacheMaxAge != time.Hour || settings.Provider != "ollama" || settings.ProviderModel != "qwen2.5-coder:0.5b" || settings.ProviderTimeout != 9*time.Second || settings.ProviderFallback != "none" || settings.GroundingPolicy != "quiet" || settings.ActivityRetention != 2*time.Hour || settings.ActivityMaxEvents != 4 || settings.CycleKeybinding != "^Xh" || !settings.Verbose || settings.Version == "default" {
 		t.Fatalf("settings = %#v", settings)
 	}
 }
@@ -40,6 +40,8 @@ func TestLoadRejectsUnsafeProviderConfiguration(t *testing.T) {
 		"[provider]\ntimeout = \"100ms\"\n",
 		"[provider]\nfallback = \"cloud\"\n",
 		"[grounding]\nambiguity = \"unsafe\"\n",
+		"[activity]\nretention = \"20s\"\n",
+		"[activity]\nmax_events = 4097\n",
 	} {
 		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 			t.Fatal(err)

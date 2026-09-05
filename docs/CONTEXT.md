@@ -7,7 +7,9 @@ read a patch, staged blob, repository history, or provider endpoint.
 The compiler reads only Git's staged index and bounded Git metadata. Its fixed
 sources are changed paths/statuses, a selected staged patch, nearby declarations,
 root package manifests, recent subjects, recent path history, a staged
-`.zsh-git-inlay.toml`, the symbolic branch, and a bounded branch issue ID.
+`.zsh-git-inlay.toml`, the symbolic branch, a bounded branch issue ID, and—only
+after a user activity grant—bounded local activity kind/count signals. Activity
+event data is never an input source.
 There is no filesystem or repository-content walk and no working-tree content
 read. Git history queries stop after their bounded result, output, and two-second
 compiler time limits. Source priority is manifest, source code, ordinary text,
@@ -23,7 +25,8 @@ tree, so unstaged content is excluded.
 
 Each source has an enforced byte budget: paths 4 KiB, patch 12 KiB, symbols
 6 KiB, manifests 6 KiB, recent subjects 2 KiB, path history 2 KiB, convention
-2 KiB, branch 256 bytes, and issue ID 128 bytes. The deterministic preview has
+2 KiB, branch 256 bytes, issue ID 128 bytes, and activity signals 512 bytes.
+The deterministic preview has
 a 32 KiB aggregate source budget; the Ollama preview has a 12 KiB aggregate
 budget, leaving room below Ollama's 16 KiB prompt limit. Command output is
 streamed into capped buffers, so an oversized diff does not create an
@@ -51,5 +54,7 @@ candidate preparation.
 The cache identity includes a versioned context fingerprint derived from the
 repository/worktree identity, HEAD or unborn ref, exact index tree, branch,
 relevant configuration, and compiler version. The cache record retains that
-fingerprint for diagnostics; the fast lookup uses the encompassing staged-state
-fingerprint and does not compile context.
+fingerprint for diagnostics. When activity signals are present, the record also
+retains only their bounded representation and digest; the daemon rejects it on
+lookup if the current signal digest changed, was cleared, was revoked, or
+expired. The fast lookup does not compile context or read event data.

@@ -21,7 +21,7 @@ const (
 	// ContextVersion changes whenever the deterministic context representation
 	// changes. Snapshot includes it without asking the ZLE lookup path to build
 	// repository context.
-	ContextVersion   = "v1"
+	ContextVersion   = "v2"
 	GroundingVersion = "v1"
 	PolicyVersion    = "v1"
 	GeneratorVersion = "v1-provider-" + config.ProviderPromptVersion + "-context-" + ContextVersion + "-grounding-" + GroundingVersion + "-policy-" + PolicyVersion

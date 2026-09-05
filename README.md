@@ -7,7 +7,7 @@ git commit -m 'chore(cache): update 2 staged files'
               # ^ prepared autosuggestion; accept with the usual forward-char/end-of-line binding
 ```
 
-This is deliberately a proof of interaction, isolation, cache, and freshness properties. It does not use an LLM, network, model download, telemetry, activity collection, or a second frontend.
+This is deliberately a proof of interaction, isolation, cache, and freshness properties. It does not use a cloud service, model download, telemetry, unconsented activity collection, or a second frontend.
 
 ## Install
 
@@ -61,6 +61,10 @@ fallback = "deterministic" # or "none"
 [grounding]
 ambiguity = "conservative" # conservative, quiet, visible, or hintable
 
+[activity]
+retention = "30m" # bounds memory only; it cannot enable collection
+max_events = 256
+
 [zsh]
 cycle_keybinding = "^Xg"
 
@@ -99,11 +103,18 @@ on the lookup path. Inspect the source choices and provider-specific budget
 without printing source content with `zsh-git-inlay context --cwd . --provider
 ollama`; see [the context compiler guide](docs/CONTEXT.md).
 
+Activity context is disabled until the user grants it with `zsh-git-inlay
+permissions enable activity`. It remains memory-only, repository/worktree
+scoped, and feeds providers only bounded derived event-kind counts. It does not
+capture command output. See [the local activity protocol](docs/ACTIVITY.md).
+
 The runtime socket defaults to `$XDG_RUNTIME_DIR/zsh-git-inlay/daemon.sock`; when that is unavailable, it uses a private XDG cache fallback. `ZSH_GIT_INLAY_RUNTIME_DIR` and `ZSH_GIT_INLAY_CACHE_DIR` are test and troubleshooting overrides.
 
 ## Diagnostics and development
 
-`fingerprint`, `context`, `status`, `candidates`, `explain`, and `daemon stop` are administrative commands, not alternate commit-message workflows:
+`fingerprint`, `context`, `status`, `candidates`, `explain`, `permissions`,
+`activity`, and `daemon stop` are administrative commands, not alternate
+commit-message workflows:
 
 ```zsh
 zsh-git-inlay fingerprint --cwd .
@@ -112,6 +123,8 @@ zsh-git-inlay context --cwd . --provider ollama
 zsh-git-inlay status --json
 zsh-git-inlay candidates --cwd .
 zsh-git-inlay explain --cwd . --json
+zsh-git-inlay permissions
+zsh-git-inlay activity inspect --cwd . --json
 zsh-git-inlay suggest --cwd . --buffer 'git commit -m ' --json
 zsh-git-inlay daemon stop
 ```
@@ -146,4 +159,4 @@ rm "$HOME/.local/bin/zsh-git-inlay"
 
 Optional cached candidates are under `$XDG_CACHE_HOME/zsh-git-inlay` (or `~/.cache/zsh-git-inlay`). Removing that directory is recoverable only from backups; it contains no repository content, only candidate metadata records.
 
-Further design, security, and roadmap details are in [PRODUCT.md](docs/PRODUCT.md), [ARCHITECTURE.md](docs/ARCHITECTURE.md), and [THREAT-MODEL.md](docs/THREAT-MODEL.md).
+Further design, security, and roadmap details are in [PRODUCT.md](docs/PRODUCT.md), [ARCHITECTURE.md](docs/ARCHITECTURE.md), [ACTIVITY.md](docs/ACTIVITY.md), and [THREAT-MODEL.md](docs/THREAT-MODEL.md).

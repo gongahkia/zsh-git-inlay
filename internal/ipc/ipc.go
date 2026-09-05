@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+
+	"github.com/gongahkia/zsh-git-inlay/internal/activity"
 )
 
 const (
@@ -15,12 +17,13 @@ const (
 )
 
 type Request struct {
-	Version     int    `json:"version"`
-	Operation   string `json:"operation"`
-	CWD         string `json:"cwd,omitempty"`
-	Fingerprint string `json:"fingerprint,omitempty"`
-	Repository  string `json:"repository_id,omitempty"`
-	Worktree    string `json:"worktree_id,omitempty"`
+	Version     int             `json:"version"`
+	Operation   string          `json:"operation"`
+	CWD         string          `json:"cwd,omitempty"`
+	Fingerprint string          `json:"fingerprint,omitempty"`
+	Repository  string          `json:"repository_id,omitempty"`
+	Worktree    string          `json:"worktree_id,omitempty"`
+	Event       *activity.Event `json:"event,omitempty"`
 }
 
 type Reply struct {

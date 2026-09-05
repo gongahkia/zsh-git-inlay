@@ -49,6 +49,17 @@ Git exposes no non-blocking transaction that can hold an index stable between a 
 
 The default idle timeout is 15 minutes. The daemon exits only when it has been idle and has no jobs, and the next background observe starts it again. It never modifies the Git index or creates a commit.
 
+Optional activity uses the same owner-only socket, but the daemon first derives
+the repository/worktree identity from the supplied local working directory and
+rejects an event whose payload claims another scope. Activity starts disabled,
+reloads the user-private grant for each event and signal lookup, and remains
+bounded memory only. The context compiler receives only a small fixed-kind
+count representation—never event data—and the cached candidate records retain
+only its digest. A permission revoke, clear, or TTL expiry changes that digest,
+so lookup returns `activity_stale` rather than rendering a candidate generated
+under prior activity evidence. [ACTIVITY.md](ACTIVITY.md) documents the schema,
+redaction, retention, and administrative controls.
+
 Provider generation also stays behind the daemon boundary. Before invoking a
 provider, the daemon compiles bounded staged-only context with inspectable
 source and truncation reasons. The context fingerprint is part of the candidate

@@ -208,3 +208,22 @@ must remain off the lookup path.
   lookup 0.145 ms/op, within the 1 ms/25 ms/0.25 ms absolute budgets. Doctor
   still found no running daemon or reachable Ollama; no model request or
   download occurred.
+- 2026-09-05: completed Milestone 7's typed local activity protocol. Activity
+  is default-deny behind a user-private `0600` permission record; the daemon
+  reloads that record for each event and signal read, clears memory on
+  revocation, and rejects non-private, malformed, or unknown permission
+  records. Version-1 events have fixed source/kind allowlists, SHA-256
+  repository/worktree IDs, bounded timestamps and structured data, sensitivity
+  classification, pre-retention redaction, TTL, per-scope and global memory
+  bounds, and replay fixtures. The private owner-only socket authenticates an
+  event's claimed scope against a fresh local Git snapshot. `permissions` and
+  `activity inspect|clear` provide the requested user controls. Only up to ten
+  allowlisted kind/count signals (512 bytes) can reach compiler context; raw
+  event data never does. Candidate records retain only that derived
+  representation/digest, and changed, cleared, revoked, or expired signals
+  make lookup `activity_stale`. Focused race tests for activity, config, IPC,
+  context, daemon, and CLI passed, as did `go test ./...`, `make test`, and
+  `make lint`. Benchmark results were parser 0.299 us/op, exact snapshot 8.37
+  ms/op, deterministic generation 1.52 ms/op, and warm socket lookup 0.099
+  ms/op, all within the 1 ms/25 ms/0.25 ms budgets. Doctor found no running
+  daemon or reachable Ollama; no model download occurred.

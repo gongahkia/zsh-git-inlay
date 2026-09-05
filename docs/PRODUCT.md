@@ -5,12 +5,13 @@
 `zsh-git-inlay` is one Zsh product. Its ordinary user interaction is unchanged Git syntax: type `git commit -m ` and let the required `zsh-autosuggestions` renderer show one prepared candidate. The user may accept with their ordinary autosuggestion binding, keep typing to constrain it, dismiss it, or press the configurable cycle binding to choose another already prepared candidate. There is no `git inlay` subcommand, Git wrapper, separate daemon product, editor frontend, menu, spinner, or TUI.
 
 The Go executable's `doctor`, `status`, `fingerprint`, `context`, `candidates`,
-`observe`, `evaluate`, and `daemon` commands are setup, diagnostic, and test
-facilities only. `evaluate` is an offline administrative harness, not an
-alternative commit-message workflow. The deterministic generator remains the
-default and test oracle. An explicitly selected existing local Ollama runtime
-can generate structured candidates from bounded staged-only context; it has
-mocked contract validation but no live-model quality claim on this host.
+`observe`, `evaluate`, `permissions`, `activity`, and `daemon` commands are
+setup, diagnostic, and test facilities only. `evaluate` is an offline
+administrative harness, not an alternative commit-message workflow. The
+deterministic generator remains the default and test oracle. An explicitly
+selected existing local Ollama runtime can generate structured candidates from
+bounded staged-only context; it has mocked contract validation but no
+live-model quality claim on this host.
 
 ## Settled future direction
 
@@ -22,11 +23,16 @@ The following are product decisions, not implemented features in this milestone:
   explicit consent; no such production distribution is configured. There is no
   silent local-to-cloud fallback.
 - Cloud providers require explicit user capability grants and, after permission, may receive equivalent selected context.
-- Activity collection is disabled by default. Retention will be user-configurable and memory-only by default. Commands and exit statuses require activity permission; bounded command output requires a separate permission.
+- Activity collection is disabled by default and has a user-only grant,
+  user-configurable memory-only retention, per-repository/worktree isolation,
+  TTL, redaction, and bounded derived-signal context. The current plugin has
+  no producer hook yet; commands, exit statuses, and command output remain
+  uncollected. Output capture will require a separate permission.
 - Relevance filtering and redaction occur before inference. The current
   compiler includes bounded staged patch/paths, declarations, root manifests,
-  repository subjects, staged convention, branch, and issue evidence. Activity,
-  tests, editor events, and LSP diagnostics remain future context sources.
+  repository subjects, staged convention, branch, issue evidence, and only
+  consented bounded activity kind/count signals. Test, editor, and LSP
+  producers remain future context sources.
 - Grounding validates provider evidence structurally and ranks supported
   candidates before normal rendering. It distinguishes deterministic checks from
   heuristic fix/behavior signals and intentionally does not promise semantic
@@ -42,7 +48,7 @@ The following are product decisions, not implemented features in this milestone:
 
 VS Code, JetBrains, model fine-tuning, cross-device synchronization, dashboards,
 and CI enforcement are deferred. This prototype does not implement a managed
-model distribution, cloud providers, activity collection, output capture,
-editor/LSP integration, source grounding, preference learning, commit bodies,
+model distribution, cloud providers, output capture, editor/LSP integration,
+preference learning, commit bodies,
 issue trackers, automatic staging, automatic commits, standalone ghost text,
 another shell, GUI/TUI, or telemetry.

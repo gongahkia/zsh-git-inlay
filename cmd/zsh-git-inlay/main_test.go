@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gongahkia/zsh-git-inlay/internal/activity"
 	"github.com/gongahkia/zsh-git-inlay/internal/config"
 	"github.com/gongahkia/zsh-git-inlay/internal/daemon"
 )
@@ -85,6 +86,31 @@ func TestExplainCommandReportsGroundingForPreparedCandidate(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("explain did not return grounding diagnostics for a prepared candidate")
+}
+
+func TestPermissionsCommandsPersistOnlyTheActivityGrant(t *testing.T) {
+	dataDirectory := t.TempDir()
+	t.Setenv("ZSH_GIT_INLAY_DATA_DIR", dataDirectory)
+	output, err := captureCommandOutput(func() error { return run([]string{"permissions"}) })
+	if err != nil || !strings.Contains(output, `"activity": false`) {
+		t.Fatalf("default permissions output=%q err=%v", output, err)
+	}
+	output, err = captureCommandOutput(func() error { return run([]string{"permissions", "enable", "activity"}) })
+	if err != nil || !strings.Contains(output, `"activity": true`) {
+		t.Fatalf("enable output=%q err=%v", output, err)
+	}
+	path := activity.PermissionsPath(dataDirectory)
+	info, statErr := os.Stat(path)
+	if statErr != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("permission file info=%v err=%v", info, statErr)
+	}
+	output, err = captureCommandOutput(func() error { return run([]string{"permissions", "revoke", "activity"}) })
+	if err != nil || !strings.Contains(output, `"activity": false`) {
+		t.Fatalf("revoke output=%q err=%v", output, err)
+	}
+	if err := run([]string{"permissions", "enable", "output"}); err == nil {
+		t.Fatal("unsupported output permission was accepted")
+	}
 }
 
 func captureCommandOutput(run func() error) (string, error) {

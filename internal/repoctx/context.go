@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gongahkia/zsh-git-inlay/internal/activity"
 	"github.com/gongahkia/zsh-git-inlay/internal/gitstate"
 )
 
@@ -38,6 +39,7 @@ type Budget struct {
 	Convention   int `json:"convention_bytes"`
 	Branch       int `json:"branch_bytes"`
 	Issue        int `json:"issue_bytes"`
+	Activity     int `json:"activity_bytes"`
 	Total        int `json:"total_bytes"`
 }
 
@@ -55,6 +57,7 @@ func budgetFor(provider string) (Budget, error) {
 		Convention:   2 * 1024,
 		Branch:       256,
 		Issue:        128,
+		Activity:     512,
 		Total:        32 * 1024,
 	}
 	if provider == "ollama" {
@@ -119,6 +122,12 @@ type changedPath struct {
 // Compile is intentionally a background operation. It bounds every Git read,
 // uses literal pathspecs, and only reads file data through the staged index.
 func Compile(ctx context.Context, cwd string, state gitstate.State, provider string) (Compiled, error) {
+	return CompileWithActivity(ctx, cwd, state, provider, nil)
+}
+
+// CompileWithActivity accepts only daemon-derived, bounded activity signals.
+// Event data is deliberately not part of this interface.
+func CompileWithActivity(ctx context.Context, cwd string, state gitstate.State, provider string, signals []activity.Signal) (Compiled, error) {
 	if state.Availability != gitstate.Ready || state.Root == "" || state.ContextFingerprint == "" {
 		return Compiled{}, fmt.Errorf("context requires a ready staged Git state")
 	}
@@ -129,6 +138,12 @@ func Compile(ctx context.Context, cwd string, state gitstate.State, provider str
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	compiler := collector{budget: budget}
+	activityText := formatActivity(signals)
+	if activityText == "" {
+		compiler.exclude("activity_signals", budget.Activity, "no consented local activity signals for this repository")
+	} else {
+		compiler.add("activity_signals", budget.Activity, activityText, "bounded consented local event-kind counts; event data is excluded", false)
+	}
 	paths, pathsTruncated, err := stagedPaths(ctx, cwd)
 	if err != nil {
 		return Compiled{}, err
@@ -213,6 +228,32 @@ func Compile(ctx context.Context, cwd string, state gitstate.State, provider str
 	contentHash := sha256.Sum256([]byte(compiled.prompt))
 	compiled.ContentFingerprint = hex.EncodeToString(contentHash[:])
 	return compiled, nil
+}
+
+func formatActivity(signals []activity.Signal) string {
+	counts := map[string]int{}
+	for _, signal := range signals {
+		if !activity.ValidKind(signal.Kind) || signal.Count < 1 || signal.Count > 4096 {
+			continue
+		}
+		counts[signal.Kind] += signal.Count
+		if counts[signal.Kind] > 4096 {
+			counts[signal.Kind] = 4096
+		}
+	}
+	filtered := make([]activity.Signal, 0, len(counts))
+	for kind, count := range counts {
+		filtered = append(filtered, activity.Signal{Kind: kind, Count: count})
+	}
+	sort.Slice(filtered, func(left, right int) bool { return filtered[left].Kind < filtered[right].Kind })
+	if len(filtered) > 10 {
+		filtered = filtered[:10]
+	}
+	var builder strings.Builder
+	for _, signal := range filtered {
+		fmt.Fprintf(&builder, "%s\t%d\n", signal.Kind, signal.Count)
+	}
+	return builder.String()
 }
 
 func pathEvidence(paths []changedPath) []Evidence {
