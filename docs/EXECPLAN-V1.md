@@ -131,3 +131,13 @@ must remain off the lookup path.
   explanation; [Inference] it is not evidence that the split-index support
   caused the observed change. The variation requires continued monitoring;
   generation and provider work remain outside the asynchronous lookup path.
+- 2026-09-05: completed Milestone 1's versioned public synthetic corpus and
+  deterministic CI runner. The harness records structural/evidence-token
+  checks, cold/warm timing, approximate process allocation, failures, provider
+  metadata, evaluator settings, and local hardware identifiers in JSON and
+  Markdown reports. Historical replay reconstructs single-parent commits in a
+  temporary staged index from local objects; reports stay in a private XDG
+  state directory and intentionally omit raw diffs. String similarity to a
+  historical subject is not scored. The corpus has fixture, replay,
+  report-privacy, and timeout/error-accounting tests; model-provider wiring is
+  deliberately deferred to Milestone 2.

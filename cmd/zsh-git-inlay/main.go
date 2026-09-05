@@ -17,6 +17,7 @@ import (
 	"github.com/gongahkia/zsh-git-inlay/internal/command"
 	"github.com/gongahkia/zsh-git-inlay/internal/config"
 	"github.com/gongahkia/zsh-git-inlay/internal/daemon"
+	"github.com/gongahkia/zsh-git-inlay/internal/evaluation"
 	"github.com/gongahkia/zsh-git-inlay/internal/gitstate"
 	"github.com/gongahkia/zsh-git-inlay/internal/ipc"
 	runtimepath "github.com/gongahkia/zsh-git-inlay/internal/runtime"
@@ -48,6 +49,8 @@ func run(arguments []string) error {
 		return candidates(arguments[1:])
 	case "status":
 		return status(arguments[1:])
+	case "evaluate":
+		return evaluateCommand(arguments[1:])
 	case "daemon":
 		return daemonCommand(arguments[1:])
 	default:
@@ -56,7 +59,7 @@ func run(arguments []string) error {
 }
 
 func usage() error {
-	return errors.New("usage: zsh-git-inlay {doctor|config|status|fingerprint|observe|suggest|candidates|daemon serve|daemon stop}")
+	return errors.New("usage: zsh-git-inlay {doctor|config|status|fingerprint|observe|suggest|candidates|evaluate|daemon serve|daemon stop}")
 }
 
 func commonFlags(name string) (*flag.FlagSet, *string, *bool) {
@@ -254,6 +257,58 @@ func status(arguments []string) error {
 		return nil
 	}
 	fmt.Println(string(reply.Payload))
+	return nil
+}
+
+func evaluateCommand(arguments []string) error {
+	flags := flag.NewFlagSet("evaluate", flag.ContinueOnError)
+	flags.SetOutput(ioDiscard{})
+	fixtures := flags.Bool("fixtures", false, "run the embedded synthetic corpus")
+	repository := flags.String("repo", "", "replay eligible commits from this local repository")
+	provider := flags.String("provider", "deterministic", "evaluation provider")
+	timeout := flags.Duration("timeout", evaluation.DefaultOptions().Timeout, "per-generation timeout")
+	limit := flags.Int("limit", evaluation.DefaultOptions().Limit, "maximum historical commits")
+	outputDirectory := flags.String("output-dir", "", "private report directory")
+	jsonOutput := flags.Bool("json", false, "emit report paths and summary as JSON")
+	if err := flags.Parse(arguments); err != nil {
+		return err
+	}
+	if (*fixtures && *repository != "") || (!*fixtures && *repository == "") {
+		return errors.New("usage: zsh-git-inlay evaluate --fixtures | --repo <local-repository>")
+	}
+	if *provider != "deterministic" {
+		return fmt.Errorf("evaluation provider %q is unavailable; only deterministic is configured in this milestone", *provider)
+	}
+	options := evaluation.Options{Timeout: *timeout, Limit: *limit}
+	var report evaluation.Report
+	var err error
+	if *fixtures {
+		corpus, corpusErr := evaluation.LoadCorpus()
+		if corpusErr != nil {
+			return corpusErr
+		}
+		report, err = evaluation.EvaluateCorpus(context.Background(), corpus, evaluation.DeterministicGenerator{}, options)
+	} else {
+		report, err = evaluation.ReplayHistory(context.Background(), *repository, evaluation.DeterministicGenerator{}, options)
+	}
+	if err != nil {
+		return err
+	}
+	directory := *outputDirectory
+	if directory == "" {
+		directory, err = runtimepath.EvaluationDir()
+		if err != nil {
+			return err
+		}
+	}
+	paths, err := evaluation.WriteReports(directory, report)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return printJSON(map[string]any{"reports": paths, "summary": report.Summary})
+	}
+	fmt.Printf("evaluation JSON: %s\nevaluation Markdown: %s\n", paths.JSON, paths.Markdown)
 	return nil
 }
 

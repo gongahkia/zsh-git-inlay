@@ -4,7 +4,7 @@
 
 `zsh-git-inlay` is one Zsh product. Its ordinary user interaction is unchanged Git syntax: type `git commit -m ` and let the required `zsh-autosuggestions` renderer show one prepared candidate. The user may accept with their ordinary autosuggestion binding, keep typing to constrain it, dismiss it, or press the configurable cycle binding to choose another already prepared candidate. There is no `git inlay` subcommand, Git wrapper, separate daemon product, editor frontend, menu, spinner, or TUI.
 
-The Go executable's `doctor`, `status`, `fingerprint`, `candidates`, `observe`, and `daemon` commands are setup, diagnostic, and test facilities only. The current generator is intentionally deterministic and prototype-quality; it proves preparation, caching, quoting, candidate ranking, stale rejection, and repository/worktree isolation, not message quality.
+The Go executable's `doctor`, `status`, `fingerprint`, `candidates`, `observe`, `evaluate`, and `daemon` commands are setup, diagnostic, and test facilities only. `evaluate` is an offline administrative harness, not an alternative commit-message workflow. The current generator is intentionally deterministic and prototype-quality; it proves preparation, caching, quoting, candidate ranking, stale rejection, repository/worktree isolation, and reproducible structural evaluation, not message quality.
 
 ## Settled future direction
 

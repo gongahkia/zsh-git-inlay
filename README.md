@@ -67,6 +67,13 @@ seven days. Startup and publication remove malformed, expired, and
 over-capacity records; `zsh-git-inlay status --json` reports the resulting
 storage and removal counters without printing candidate content.
 
+`zsh-git-inlay evaluate --fixtures` runs the versioned public synthetic
+evaluation corpus. `zsh-git-inlay evaluate --repo /path/to/local/repository`
+replays eligible local parent-to-commit staged states into a temporary index.
+Both emit JSON and Markdown reports to a private XDG state directory by default;
+see [the evaluation guide](docs/EVALUATION.md). Evaluation is administrative
+only and does not alter the Zsh suggestion path.
+
 The runtime socket defaults to `$XDG_RUNTIME_DIR/zsh-git-inlay/daemon.sock`; when that is unavailable, it uses a private XDG cache fallback. `ZSH_GIT_INLAY_RUNTIME_DIR` and `ZSH_GIT_INLAY_CACHE_DIR` are test and troubleshooting overrides.
 
 ## Diagnostics and development

@@ -44,6 +44,30 @@ func CacheDir() (string, error) {
 	return ensurePrivate(filepath.Join(base, "zsh-git-inlay", "cache"))
 }
 
+// StateDir stores durable local administrative data such as evaluation reports.
+func StateDir() (string, error) {
+	if override := os.Getenv("ZSH_GIT_INLAY_STATE_DIR"); override != "" {
+		return ensurePrivate(override)
+	}
+	base := os.Getenv("XDG_STATE_HOME")
+	if base == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		base = filepath.Join(home, ".local", "state")
+	}
+	return ensurePrivate(filepath.Join(base, "zsh-git-inlay"))
+}
+
+func EvaluationDir() (string, error) {
+	state, err := StateDir()
+	if err != nil {
+		return "", err
+	}
+	return ensurePrivate(filepath.Join(state, "evaluations"))
+}
+
 func SocketPath() (string, error) {
 	directory, err := Dir()
 	if err != nil {
