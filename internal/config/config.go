@@ -13,10 +13,19 @@ import (
 
 const DefaultIdleTimeout = 15 * time.Minute
 
+const (
+	DefaultCacheMaxRecords = 512
+	DefaultCacheMaxBytes   = 32 * 1024 * 1024
+	DefaultCacheMaxAge     = 7 * 24 * time.Hour
+)
+
 type Settings struct {
 	IdleTimeout       time.Duration
 	MaxRepositories   int
 	MaxGenerationJobs int
+	CacheMaxRecords   int
+	CacheMaxBytes     int64
+	CacheMaxAge       time.Duration
 	CycleKeybinding   string
 	Verbose           bool
 	Version           string
@@ -27,6 +36,9 @@ func Default() Settings {
 		IdleTimeout:       DefaultIdleTimeout,
 		MaxRepositories:   32,
 		MaxGenerationJobs: 2,
+		CacheMaxRecords:   DefaultCacheMaxRecords,
+		CacheMaxBytes:     DefaultCacheMaxBytes,
+		CacheMaxAge:       DefaultCacheMaxAge,
 		CycleKeybinding:   "^Xg",
 		Version:           "default",
 	}
@@ -66,6 +78,9 @@ func Load() (Settings, error) {
 		"daemon.idle_timeout":               true,
 		"daemon.max_active_repositories":    true,
 		"daemon.max_generation_concurrency": true,
+		"cache.max_records":                 true,
+		"cache.max_bytes":                   true,
+		"cache.max_age":                     true,
 		"zsh.cycle_keybinding":              true,
 		"diagnostics.verbose":               true,
 	})
@@ -92,6 +107,27 @@ func Load() (Settings, error) {
 		settings.MaxGenerationJobs, err = strconv.Atoi(value)
 		if err != nil || settings.MaxGenerationJobs < 1 || settings.MaxGenerationJobs > 16 {
 			return Settings{}, fmt.Errorf("invalid config %s: daemon.max_generation_concurrency must be 1..16", path)
+		}
+	}
+	if value, ok := values["cache.max_records"]; ok {
+		settings.CacheMaxRecords, err = strconv.Atoi(value)
+		if err != nil || settings.CacheMaxRecords < 1 || settings.CacheMaxRecords > 4096 {
+			return Settings{}, fmt.Errorf("invalid config %s: cache.max_records must be 1..4096", path)
+		}
+	}
+	if value, ok := values["cache.max_bytes"]; ok {
+		settings.CacheMaxBytes, err = strconv.ParseInt(value, 10, 64)
+		if err != nil || settings.CacheMaxBytes < 64*1024 || settings.CacheMaxBytes > 1024*1024*1024 {
+			return Settings{}, fmt.Errorf("invalid config %s: cache.max_bytes must be 65536..1073741824", path)
+		}
+	}
+	if value, ok := values["cache.max_age"]; ok {
+		if !quoted(value) {
+			return Settings{}, fmt.Errorf("invalid config %s: cache.max_age must be a string duration", path)
+		}
+		settings.CacheMaxAge, err = time.ParseDuration(unquote(value))
+		if err != nil || settings.CacheMaxAge <= 0 || settings.CacheMaxAge > 365*24*time.Hour {
+			return Settings{}, fmt.Errorf("invalid config %s: cache.max_age must be positive and at most 8760h", path)
 		}
 	}
 	if value, ok := values["zsh.cycle_keybinding"]; ok {

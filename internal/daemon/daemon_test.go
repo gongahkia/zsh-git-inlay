@@ -4,13 +4,16 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/gongahkia/zsh-git-inlay/internal/candidate"
 	"github.com/gongahkia/zsh-git-inlay/internal/config"
 	"github.com/gongahkia/zsh-git-inlay/internal/gitstate"
 	"github.com/gongahkia/zsh-git-inlay/internal/ipc"
@@ -83,6 +86,72 @@ func TestMalformedSocketRequestIsRejected(t *testing.T) {
 	}
 }
 
+func TestTruncatedSocketRequestDoesNotStopDaemon(t *testing.T) {
+	_, socket := testServer(t)
+	connection, err := net.Dial("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var header [4]byte
+	binary.BigEndian.PutUint32(header[:], 10)
+	if _, err := connection.Write(header[:]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := connection.Write([]byte("{}")); err != nil {
+		t.Fatal(err)
+	}
+	connection.Close()
+	if reply := daemonCall(t, socket, ipc.Request{Version: ipc.Version, Operation: "status"}); reply.Status != "ready" {
+		t.Fatalf("daemon did not survive truncated request: %#v", reply)
+	}
+}
+
+func TestConcurrentSessionsAndRapidIndexChanges(t *testing.T) {
+	_, socket := testServer(t)
+	repository := daemonRepository(t, "state.txt")
+	errors := make(chan error, 12)
+	for client := 0; client < cap(errors); client++ {
+		go func() {
+			connection, err := net.Dial("unix", socket)
+			if err != nil {
+				errors <- err
+				return
+			}
+			defer connection.Close()
+			if err := ipc.WriteRequest(connection, ipc.Request{Version: ipc.Version, Operation: "observe", CWD: repository}); err != nil {
+				errors <- err
+				return
+			}
+			reply, err := ipc.ReadReply(connection)
+			if err != nil || (reply.Status != "pending" && reply.Status != "ready") {
+				errors <- fmt.Errorf("observe reply=%#v err=%v", reply, err)
+				return
+			}
+			errors <- nil
+		}()
+	}
+	for client := 0; client < cap(errors); client++ {
+		if err := <-errors; err != nil {
+			t.Fatal(err)
+		}
+	}
+	for revision := 0; revision < 12; revision++ {
+		if err := os.WriteFile(filepath.Join(repository, "state.txt"), []byte(fmt.Sprintf("state %d\n", revision)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		daemonGit(t, repository, "add", "state.txt")
+		reply := daemonCall(t, socket, ipc.Request{Version: ipc.Version, Operation: "observe", CWD: repository})
+		if reply.Status != "pending" && reply.Status != "ready" {
+			t.Fatalf("rapid observe %d = %#v", revision, reply)
+		}
+	}
+	final := daemonSnapshot(t, repository)
+	record := waitForRecord(t, socket, final)
+	if record.Fingerprint != final.Fingerprint {
+		t.Fatalf("final record fingerprint = %s, want %s", record.Fingerprint, final.Fingerprint)
+	}
+}
+
 func TestServeExitsAfterIdleTimeout(t *testing.T) {
 	runtimeDir, cacheDir := filepath.Join(t.TempDir(), "runtime"), filepath.Join(t.TempDir(), "cache")
 	t.Setenv("ZSH_GIT_INLAY_RUNTIME_DIR", runtimeDir)
@@ -126,6 +195,155 @@ func TestPrepareSocketRefusesRegularFile(t *testing.T) {
 	if _, err := prepareSocket(path); err == nil {
 		t.Fatal("regular file was accepted as a replaceable socket")
 	}
+}
+
+func TestCacheGarbageCollectionEnforcesCountAndAge(t *testing.T) {
+	root := t.TempDir()
+	settings := config.Default()
+	settings.CacheMaxRecords = 2
+	settings.CacheMaxAge = time.Hour
+	server := New(settings, filepath.Join(root, "daemon.sock"), root)
+	oldest := cacheRecord("a", time.Now().Add(-30*time.Minute))
+	middle := cacheRecord("b", time.Now().Add(-20*time.Minute))
+	newest := cacheRecord("c", time.Now().Add(-10*time.Minute))
+	for _, record := range []Record{oldest, middle, newest} {
+		if err := server.store(record); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := os.Stat(server.cachePath(oldest.Fingerprint)); !os.IsNotExist(err) {
+		t.Fatalf("oldest record survived count GC: %v", err)
+	}
+	if _, err := os.Stat(server.cachePath(middle.Fingerprint)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(server.cachePath(newest.Fingerprint)); err != nil {
+		t.Fatal(err)
+	}
+	if status := daemonStatus(t, server); status.Cache.Entries != 2 || status.Cache.CapacityRemoved != 1 {
+		t.Fatalf("cache status = %#v", status.Cache)
+	}
+
+	expired := cacheRecord("d", time.Now().Add(-2*time.Hour))
+	if err := server.store(expired); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(server.cachePath(expired.Fingerprint)); !os.IsNotExist(err) {
+		t.Fatalf("expired record survived age GC: %v", err)
+	}
+	if status := daemonStatus(t, server); status.Cache.ExpiredRemoved != 1 {
+		t.Fatalf("expired record was not accounted: %#v", status.Cache)
+	}
+}
+
+func TestCacheGarbageCollectionRemovesCorruptAndStaleRecords(t *testing.T) {
+	root := t.TempDir()
+	server := New(config.Default(), filepath.Join(root, "daemon.sock"), root)
+	corruptFingerprint := strings.Repeat("d", 64)
+	if err := os.WriteFile(server.cachePath(corruptFingerprint), []byte("not JSON"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.collectCache(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(server.cachePath(corruptFingerprint)); !os.IsNotExist(err) {
+		t.Fatalf("corrupt record survived: %v", err)
+	}
+	if status := daemonStatus(t, server); status.Cache.CorruptRemoved != 1 {
+		t.Fatalf("corrupt record was not accounted: %#v", status.Cache)
+	}
+
+	record := cacheRecord("e", time.Now())
+	if err := server.store(record); err != nil {
+		t.Fatal(err)
+	}
+	server.discardRecord(record.Fingerprint, true)
+	if _, err := os.Stat(server.cachePath(record.Fingerprint)); !os.IsNotExist(err) {
+		t.Fatalf("discarded stale record survived: %v", err)
+	}
+	if status := daemonStatus(t, server); status.Cache.StaleDiscarded != 1 {
+		t.Fatalf("stale record was not accounted: %#v", status.Cache)
+	}
+}
+
+func TestCacheGarbageCollectionEnforcesByteLimit(t *testing.T) {
+	root := t.TempDir()
+	settings := config.Default()
+	settings.CacheMaxRecords = 512
+	settings.CacheMaxBytes = 64 * 1024
+	server := New(settings, filepath.Join(root, "daemon.sock"), root)
+	created := time.Now()
+	for index := 0; index < 320; index++ {
+		record := cacheRecordFingerprint(fmt.Sprintf("%064x", index), created)
+		encoded, err := json.Marshal(record)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(server.cachePath(record.Fingerprint), encoded, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := server.collectCache(); err != nil {
+		t.Fatal(err)
+	}
+	status := daemonStatus(t, server)
+	if status.Cache.Bytes > settings.CacheMaxBytes || status.Cache.CapacityRemoved == 0 || status.Cache.Entries >= 320 {
+		t.Fatalf("byte limit was not enforced: %#v", status.Cache)
+	}
+}
+
+func TestCacheDoesNotRememberAnEvictedRecord(t *testing.T) {
+	root := t.TempDir()
+	settings := config.Default()
+	settings.CacheMaxRecords = 1
+	server := New(settings, filepath.Join(root, "daemon.sock"), root)
+	newer := cacheRecord("a", time.Now())
+	if err := server.store(newer); err != nil {
+		t.Fatal(err)
+	}
+	if !server.remember(newer.Fingerprint) {
+		t.Fatal("retained record was not remembered")
+	}
+	older := cacheRecord("b", time.Now().Add(-time.Minute))
+	if err := server.store(older); err != nil {
+		t.Fatal(err)
+	}
+	if server.remember(older.Fingerprint) {
+		t.Fatal("evicted record was remembered")
+	}
+	server.mu.Lock()
+	_, retained := server.cache[newer.Fingerprint]
+	_, evicted := server.cache[older.Fingerprint]
+	server.mu.Unlock()
+	if !retained || evicted {
+		t.Fatalf("memory cache retained=%t evicted=%t", retained, evicted)
+	}
+}
+
+func cacheRecord(seed string, created time.Time) Record {
+	return cacheRecordFingerprint(strings.Repeat(seed, 64), created)
+}
+
+func cacheRecordFingerprint(fingerprint string, created time.Time) Record {
+	return Record{
+		Fingerprint: fingerprint,
+		Repository:  strings.Repeat("r", 64),
+		Worktree:    strings.Repeat("w", 64),
+		CreatedAt:   created,
+		Candidates: []candidate.Candidate{
+			{Message: "chore(repo): update staged files", Rank: 0},
+			{Message: "chore(repo): refine staged changes", Rank: 1},
+		},
+	}
+}
+
+func daemonStatus(t *testing.T, server *Server) Status {
+	t.Helper()
+	var status Status
+	if err := json.Unmarshal(server.status().Payload, &status); err != nil {
+		t.Fatal(err)
+	}
+	return status
 }
 
 func testServer(t *testing.T) (*Server, string) {

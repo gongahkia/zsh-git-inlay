@@ -46,7 +46,7 @@ func BenchmarkWarmLookupRoundTrip(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	record := Record{Fingerprint: state.Fingerprint, Repository: state.RepoID, Worktree: state.WorktreeID, Candidates: candidates}
+	record := Record{Fingerprint: state.Fingerprint, Repository: state.RepoID, Worktree: state.WorktreeID, Candidates: candidates, CreatedAt: time.Now().UTC()}
 	if err := server.store(record); err != nil {
 		b.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func candidateForBenchmark(repository string) ([]candidate.Candidate, error) {
 }
 
 func BenchmarkCacheRecordEncoding(b *testing.B) {
-	record := Record{Fingerprint: "fingerprint", Repository: "repository", Worktree: "worktree", Candidates: []candidate.Candidate{{Message: "chore(repo): prepare staged update", Rank: 0}}}
+	record := Record{Fingerprint: "fingerprint", Repository: "repository", Worktree: "worktree", Candidates: []candidate.Candidate{{Message: "chore(repo): prepare staged update", Rank: 0}}, CreatedAt: time.Unix(0, 0).UTC()}
 	for index := 0; index < b.N; index++ {
 		if _, err := json.Marshal(record); err != nil {
 			b.Fatal(err)

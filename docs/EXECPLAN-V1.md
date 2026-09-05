@@ -1,0 +1,133 @@
+# V1 execution plan
+
+## Baseline audit — 2026-09-05
+
+Starting state for this V1 effort is `7ab8367` on `main`. `main` and
+`origin/main` both resolve to that commit. This contradicts the prior handoff's
+claim that nothing had been pushed: the local repository has no evidence of
+who pushed it, so this plan records the discrepancy rather than attributing it
+or rewriting history.
+
+History is linear:
+
+```text
+8dc6d2a idea
+  -> bc338c2 newinternalsofrtheZSHmodel
+  -> 2864c51 addedtheidea
+  -> 48bc3ae ripmybrutha
+  -> 7ab8367 fix: fingerprint without mutating Git index
+```
+
+`master` was renamed to `main` before `bc338c2`; the reflog does not identify
+an author or reason beyond the local rename. The commits `2864c51` and
+`48bc3ae` are present in current history and are preserved unchanged. Their
+messages are not descriptive, but cosmetic history rewrites are out of scope.
+
+### Verified evidence
+
+| Item | Evidence |
+| --- | --- |
+| Working tree | clean at audit start |
+| Go/Git/Zsh | Go 1.26.7, Git 2.55.0, Zsh 5.9 |
+| Neovim | 0.11.6 available |
+| Ollama | unavailable; no model query or download attempted |
+| `zsh-autosuggestions` | local source found and real-Zsh integration passed |
+| Prototype test/lint | `make test` and `make lint` passed |
+| Prototype benchmark | `make bench` passed; snapshot 5.38 ms/op, deterministic generation 1.21 ms/op, warm socket lookup 0.059 ms/op in this audit run |
+| Doctor | `go run ./cmd/zsh-git-inlay doctor --json` found Git, Zsh and autosuggestions; daemon was absent as expected |
+
+### Baseline gaps and risks
+
+- Content-addressed candidate records have no retention quota, count limit, or
+  garbage collection. The existing final-validation race can therefore retain
+  unreachable records indefinitely.
+- Exact lookup prevents a retained stale record from rendering, but diagnostics
+  do not distinguish or account for obsolete storage.
+- Cache records are not versioned beyond their fingerprint and cannot support
+  later provider/context/policy provenance.
+- The current config parser supports only prototype fields; it needs a typed,
+  versioned extension without weakening the repository security floor.
+- The deterministic provider has no context, grounding, policy, activity,
+  learning, provider, cloud, or composition capability.
+- The V1 claims in `docs/PRODUCT.md` are future tense. New documentation must
+  continue to separate implementation, mocked validation, platform limitation,
+  rejection, and plan.
+
+## Architecture retained from the prototype
+
+The Zsh plugin is the only frontend and uses the supported ordered
+`zsh-autosuggestions` strategy API. A strategy parses a bounded buffer and
+performs only an exact staged-state identity plus bounded Unix-socket lookup;
+generation remains in the daemon. The daemon owns caching and background work.
+Fingerprints include repository/worktree identity, HEAD/unborn state, exact
+staged tree, generator version, and configuration version. A private alternate
+index is used for `git write-tree`, so fingerprinting does not modify the real
+Git index.
+
+This boundary remains unchanged unless a measured failing gate requires a
+change.
+
+## Milestones and gates
+
+| Milestone | Deliverable | Required validation |
+| --- | --- | --- |
+| 0. baseline hardening | bounded cache lifecycle, stale-record accounting/GC, expanded Git/IPC/crash/rapid-change coverage, performance budgets | focused cache tests, `make test`, `make lint`, `make bench`, soak target |
+| 1. evaluation | synthetic versioned corpus, local-history replay, JSON and Markdown reports | deterministic CI fixture and private-corpus exclusion test |
+| 2. providers | minimal provider contract, deterministic provider, Ollama implementation and mocks | malformed/cancellation/supersession tests; live Ollama only if available |
+| 3. managed local model | consented acquisition design, pinned-manifest checks, install/rollback/uninstall diagnostics | mocked download/checksum/platform tests; document missing release-signing authority if applicable |
+| 4. context | bounded staged-only compiler, redaction, inspection command and cache identity | deterministic budget/redaction/prompt-injection tests |
+| 5. grounding | structural candidate schema, evidence validation, ranking and explain diagnostics | adversarial unsupported-claim tests and lookup regression benchmark |
+| 6. policy | typed declarative repository convention/scope policy and provenance diagnostics | malicious configuration and precedence tests |
+| 7–8. activity | versioned local event protocol, explicit permissions, safe Zsh hooks and separate output capture | consent/revocation/TTL/repository-isolation/secret-redaction tests |
+| 9. Neovim | Lua event-only adapter and health checks | headless Neovim tests on this host; disclose other-platform gaps |
+| 10. learning | bounded per-repository profile, controls, import/export and clone consent | reset/disable/isolation/consent tests |
+| 11. cloud | capability-grant model and mock provider contract | no-transmission-without-grant, revocation, credential-redaction tests; no paid live request |
+| 12. UX extensions | prefix-conditioned reranking and safe secondary compose flow | no-blocking/stale/never-commit tests |
+| 13. release engineering | versioning, install/upgrade/uninstall, checksums, CI and release snapshot | clean-install lifecycle and reproducible snapshot test |
+| 14. reliability | integration, evaluation, soak, security and performance report | all project targets, regression budget review |
+
+## Performance policy
+
+The prototype benchmark is noisy on this shared host, so V1 uses both
+absolute limits and a relative investigation threshold. The synchronous ZLE
+path must remain free of generation, repository patch scanning, daemon startup
+waits, and network access. The asynchronous strategy helper must have a 50 ms
+local lookup deadline. The current absolute benchmark limits are 1 ms for
+parser composition, 0.25 ms for a warm local socket lookup, and 25 ms for the
+background exact-state snapshot. A benchmark regression exceeding 25% from the
+recorded baseline is investigated and recorded; it is accepted only with
+measured evidence and an updated rationale. Provider/context/grounding work
+must remain off the lookup path.
+
+## Rejected approaches
+
+- A Git wrapper, alternate shell frontend, standalone renderer, menu, TUI, or
+  editor suggestion frontend: violate the single Zsh product boundary.
+- `git write-tree` against the real index: it can update Git's cache-tree
+  extension. The alternate private index copy is retained.
+- Unbounded raw cache retention: fails the V1 privacy and storage gate.
+- Automatic model downloads or cloud fallback: violate explicit consent.
+- Transparent shell output interception: changes command semantics and is not
+  an acceptable default collection mechanism.
+
+## Progress log
+
+- 2026-09-05: audited current state, history, remotes, code, docs, tests,
+  benchmarks, doctor, and installed local runtimes. Milestone 0 began.
+- 2026-09-05: added cache retention settings (record count, byte, and age
+  bounds), deterministic startup/publication garbage collection, cache metrics,
+  malformed-record validation, and a post-publication stale discard. Focused
+  and full validation are recorded with the milestone commit.
+- 2026-09-05: expanded Milestone 0 coverage for split indexes, submodule
+  gitlinks, hostile filenames, truncated IPC, concurrent clients, rapid index
+  changes, cache count/age/byte limits, and killed-daemon recovery. Five-run
+  measurements on the shared host showed snapshot latency from 13.74 to 14.70
+  ms/op, warm lookup from 0.138 to 0.152 ms/op, and parser composition at
+  0.36 µs/op. These values meet the absolute limits and remain below the
+  previously documented prototype measurements (23.13 ms snapshot and
+  0.208 ms warm lookup), but exceed the 25% relative threshold from this
+  audit's unusually fast first run. The unchanged parser measurement also
+  varied substantially, so host scheduling is the strongest available
+  explanation; [Inference] it is not evidence that the split-index support
+  caused the observed change. The variation requires continued monitoring;
+  generation and provider work remain outside the asynchronous lookup path.

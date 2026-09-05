@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -183,6 +184,31 @@ func TestSnapshotDoesNotModifyIndexEntries(t *testing.T) {
 	}
 }
 
+func TestSnapshotSupportsSplitIndex(t *testing.T) {
+	repository := newRepository(t, true)
+	gitRun(t, repository, "config", "core.splitIndex", "true")
+	gitRun(t, repository, "update-index", "--split-index")
+	write(t, repository, "split.txt", "staged\n")
+	gitRun(t, repository, "add", "split.txt")
+	state := snapshot(t, repository)
+	if state.Availability != Ready {
+		t.Fatalf("split index availability = %s (%s)", state.Availability, state.Reason)
+	}
+}
+
+func TestSnapshotSupportsSubmoduleGitlinksAndUnusualFilenames(t *testing.T) {
+	repository := newRepository(t, true)
+	submodule := newRepository(t, true)
+	commit := strings.TrimSpace(gitOutput(t, submodule, "rev-parse", "HEAD"))
+	gitRun(t, repository, "update-index", "--add", "--cacheinfo", "160000,"+commit+",vendor/module")
+	name := "odd/$(not-evaluated); tab\tnewline\nfile.txt"
+	write(t, repository, name, "staged\n")
+	gitRun(t, repository, "add", "--", name)
+	if state := snapshot(t, repository); state.Availability != Ready {
+		t.Fatalf("gitlink/unusual filename availability = %s (%s)", state.Availability, state.Reason)
+	}
+}
+
 func snapshot(t *testing.T, cwd string) State {
 	t.Helper()
 	context, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -225,4 +251,14 @@ func gitRun(t *testing.T, cwd string, arguments ...string) {
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", arguments, err, output)
 	}
+}
+
+func gitOutput(t *testing.T, cwd string, arguments ...string) string {
+	t.Helper()
+	command := exec.Command("git", append([]string{"-C", cwd}, arguments...)...)
+	output, err := command.Output()
+	if err != nil {
+		t.Fatalf("git %v: %v", arguments, err)
+	}
+	return string(output)
 }

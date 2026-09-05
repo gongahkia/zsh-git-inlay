@@ -181,6 +181,12 @@ func safe(value string) bool {
 	return true
 }
 
+// Valid verifies an untrusted cached or provider-produced candidate before it
+// can reach the shell composition layer.
+func Valid(value Candidate) bool {
+	return value.Rank >= 0 && value.Rank < MaxCandidates && safe(value.Message)
+}
+
 func plural(count int) string {
 	if count == 1 {
 		return ""

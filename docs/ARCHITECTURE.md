@@ -35,7 +35,15 @@ IPC is a length-prefixed, versioned JSON request/reply protocol with a 16 KiB re
 
 An `observe` request snapshots the repository, bounds active repositories, and deduplicates a job by fingerprint. A new fingerprint for the same repository/worktree cancels the old job. Generation concurrency is bounded. Before publishing, the worker snapshots the same worktree again and discards a mismatched result. Candidate records are written to a private temporary file, synced, closed, and atomically renamed into a content-addressed cache file. A cold daemon loads a matching on-disk record rather than regenerating it.
 
-Git exposes no non-blocking transaction that can hold an index stable between a final `write-tree` check and cache rename without interfering with ordinary Git. Therefore an index update in that tiny interval can leave an obsolete content-addressed record on disk. This is a documented deviation from atomic cache freshness: it cannot become a stale display because every lookup recomputes the exact current fingerprint and requires matching repository/worktree IDs; the next observe schedules the new state. Tests prove both pre-publication supersession rejection and lookup-time stale rejection.
+Candidate storage is bounded by a validated user configuration: 512 records,
+32 MiB, and seven days by default. Startup and every publication deterministically
+remove malformed, expired, and oldest over-capacity records; lookup also removes
+an expired record. `status --json` reports current cache size and cumulative
+expired, corrupt, capacity, and stale-result removals without exposing candidate
+text. The daemon's final post-publication snapshot removes a result that became
+superseded during publication.
+
+Git exposes no non-blocking transaction that can hold an index stable between a final `write-tree` check and cache rename without interfering with ordinary Git. An index update in the remaining tiny interval can leave an obsolete content-addressed record, but bounded retention and deterministic garbage collection contain that storage. It cannot become a stale display because every lookup recomputes the exact current fingerprint and requires matching repository/worktree IDs; the next observe schedules the new state. Tests prove pre-publication supersession rejection, post-publication stale discard, lookup-time stale rejection, and bounded cache retention.
 
 The default idle timeout is 15 minutes. The daemon exits only when it has been idle and has no jobs, and the next background observe starts it again. It never modifies the Git index or creates a commit.
 

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,12 +31,25 @@ type Record struct {
 }
 
 type Status struct {
-	Socket      string `json:"socket"`
-	Ready       int    `json:"ready"`
-	Pending     int    `json:"pending"`
-	Active      int    `json:"active_repositories"`
-	IdleAfter   string `json:"idle_after"`
-	LastObserve string `json:"last_observe,omitempty"`
+	Socket      string      `json:"socket"`
+	Ready       int         `json:"ready"`
+	Pending     int         `json:"pending"`
+	Active      int         `json:"active_repositories"`
+	IdleAfter   string      `json:"idle_after"`
+	LastObserve string      `json:"last_observe,omitempty"`
+	Cache       CacheStatus `json:"cache"`
+}
+
+// CacheStatus reports bounded candidate storage without exposing candidate text.
+type CacheStatus struct {
+	Entries         int   `json:"entries"`
+	Bytes           int64 `json:"bytes"`
+	MaxEntries      int   `json:"max_entries"`
+	MaxBytes        int64 `json:"max_bytes"`
+	ExpiredRemoved  int   `json:"expired_removed"`
+	CorruptRemoved  int   `json:"corrupt_removed"`
+	CapacityRemoved int   `json:"capacity_removed"`
+	StaleDiscarded  int   `json:"stale_discarded"`
 }
 
 type Server struct {
@@ -44,6 +58,7 @@ type Server struct {
 	cacheDir string
 
 	mu          sync.Mutex
+	cacheMu     sync.Mutex
 	cache       map[string]Record
 	active      map[string]active
 	jobs        map[string]job
@@ -51,6 +66,7 @@ type Server struct {
 	sem         chan struct{}
 	lastUse     time.Time
 	lastObserve string
+	cacheStatus CacheStatus
 	stop        chan struct{}
 	stopped     sync.Once
 }
@@ -67,7 +83,7 @@ type job struct {
 }
 
 func New(settings config.Settings, socket, cacheDir string) *Server {
-	return &Server{settings: settings, socket: socket, cacheDir: cacheDir, cache: map[string]Record{}, active: map[string]active{}, jobs: map[string]job{}, sem: make(chan struct{}, settings.MaxGenerationJobs), lastUse: time.Now(), stop: make(chan struct{})}
+	return &Server{settings: settings, socket: socket, cacheDir: cacheDir, cache: map[string]Record{}, active: map[string]active{}, jobs: map[string]job{}, sem: make(chan struct{}, settings.MaxGenerationJobs), lastUse: time.Now(), cacheStatus: CacheStatus{MaxEntries: settings.CacheMaxRecords, MaxBytes: settings.CacheMaxBytes}, stop: make(chan struct{})}
 }
 
 func Serve(ctx context.Context, settings config.Settings, initialCWD string) error {
@@ -97,6 +113,10 @@ func Serve(ctx context.Context, settings config.Settings, initialCWD string) err
 		return err
 	}
 	server := New(settings, socket, cacheDir)
+	if err := server.collectCache(); err != nil {
+		listener.Close()
+		return err
+	}
 	defer func() { listener.Close(); _ = os.Remove(socket) }()
 	go func() { <-ctx.Done(); server.Close() }()
 	if initialCWD != "" {
@@ -180,6 +200,7 @@ func (server *Server) observe(cwd string) ipc.Reply {
 	if state.Availability != gitstate.Ready {
 		return server.noteObserve(ipc.Reply{Version: ipc.Version, Status: string(state.Availability), Error: state.Reason})
 	}
+	cached, cacheErr := server.load(state.Fingerprint)
 	server.mu.Lock()
 	server.evictLocked()
 	previous, seen := server.active[state.Scope()]
@@ -190,11 +211,12 @@ func (server *Server) observe(cwd string) ipc.Reply {
 		}
 	}
 	server.active[state.Scope()] = active{cwd: cwd, seen: time.Now(), fingerprint: state.Fingerprint}
-	if _, ready := server.cache[state.Fingerprint]; ready {
+	if record, ready := server.cache[state.Fingerprint]; ready && !server.expired(record) {
 		server.mu.Unlock()
 		return ipc.Reply{Version: ipc.Version, Status: "ready"}
 	}
-	if cached, err := server.load(state.Fingerprint); err == nil && cached.Repository == state.RepoID && cached.Worktree == state.WorktreeID {
+	delete(server.cache, state.Fingerprint)
+	if cacheErr == nil && cached.Repository == state.RepoID && cached.Worktree == state.WorktreeID {
 		server.cache[state.Fingerprint] = cached
 		server.mu.Unlock()
 		return ipc.Reply{Version: ipc.Version, Status: "ready"}
@@ -228,9 +250,14 @@ func (server *Server) generate(ctx context.Context, expected gitstate.State, cwd
 		if checkErr == nil && current.Availability == gitstate.Ready && current.Fingerprint == expected.Fingerprint {
 			record := Record{Fingerprint: expected.Fingerprint, Repository: expected.RepoID, Worktree: expected.WorktreeID, Candidates: candidates, CreatedAt: time.Now().UTC()}
 			if server.store(record) == nil {
-				server.mu.Lock()
-				server.cache[record.Fingerprint] = record
-				server.mu.Unlock()
+				finalContext, finalCancel := gitstate.WithTimeout()
+				final, finalErr := gitstate.Snapshot(finalContext, cwd)
+				finalCancel()
+				if finalErr != nil || final.Availability != gitstate.Ready || final.Fingerprint != expected.Fingerprint {
+					server.discardRecord(record.Fingerprint, true)
+				} else {
+					server.remember(record.Fingerprint)
+				}
 			}
 		}
 	}
@@ -251,7 +278,16 @@ func (server *Server) lookup(request ipc.Request) ipc.Reply {
 	}
 	server.mu.Lock()
 	record, found := server.cache[request.Fingerprint]
+	expired := false
+	if found && server.expired(record) {
+		delete(server.cache, request.Fingerprint)
+		found = false
+		expired = true
+	}
 	server.mu.Unlock()
+	if expired {
+		server.discardExpired(request.Fingerprint)
+	}
 	if !found {
 		loaded, err := server.load(request.Fingerprint)
 		if err == nil {
@@ -275,8 +311,11 @@ func (server *Server) lookup(request ipc.Request) ipc.Reply {
 }
 
 func (server *Server) status() ipc.Reply {
+	server.cacheMu.Lock()
+	cacheStatus := server.cacheStatus
+	server.cacheMu.Unlock()
 	server.mu.Lock()
-	status := Status{Socket: server.socket, Ready: len(server.cache), Pending: len(server.jobs), Active: len(server.active), IdleAfter: server.settings.IdleTimeout.String(), LastObserve: server.lastObserve}
+	status := Status{Socket: server.socket, Ready: len(server.cache), Pending: len(server.jobs), Active: len(server.active), IdleAfter: server.settings.IdleTimeout.String(), LastObserve: server.lastObserve, Cache: cacheStatus}
 	server.mu.Unlock()
 	payload, _ := json.Marshal(status)
 	return ipc.Reply{Version: ipc.Version, Status: "ready", Payload: payload}
@@ -347,25 +386,197 @@ func (server *Server) store(record Record) error {
 	if err != nil {
 		return err
 	}
-	return os.Rename(name, server.cachePath(record.Fingerprint))
+	if err := os.Rename(name, server.cachePath(record.Fingerprint)); err != nil {
+		return err
+	}
+	return server.collectCache()
 }
 
 func (server *Server) load(fingerprint string) (Record, error) {
+	server.cacheMu.Lock()
+	defer server.cacheMu.Unlock()
+	return server.loadLocked(fingerprint)
+}
+
+func (server *Server) loadLocked(fingerprint string) (Record, error) {
 	var record Record
 	content, err := os.ReadFile(server.cachePath(fingerprint))
 	if err != nil {
 		return record, err
 	}
 	if len(content) > ipc.MaxReplyBytes {
+		server.removeCachePathLocked(fingerprint, &server.cacheStatus.CorruptRemoved)
 		return record, fmt.Errorf("candidate cache record too large")
 	}
 	if err = json.Unmarshal(content, &record); err != nil {
+		server.removeCachePathLocked(fingerprint, &server.cacheStatus.CorruptRemoved)
 		return record, err
 	}
-	if record.Fingerprint != fingerprint || len(record.Candidates) == 0 || len(record.Candidates) > candidate.MaxCandidates {
+	if !validRecord(record, fingerprint) {
+		server.removeCachePathLocked(fingerprint, &server.cacheStatus.CorruptRemoved)
 		return Record{}, fmt.Errorf("invalid candidate cache record")
 	}
+	if server.expired(record) {
+		server.removeCachePathLocked(fingerprint, &server.cacheStatus.ExpiredRemoved)
+		return Record{}, os.ErrNotExist
+	}
 	return record, nil
+}
+
+func (server *Server) collectCache() error {
+	server.cacheMu.Lock()
+	defer server.cacheMu.Unlock()
+	kept, err := server.collectCacheLocked()
+	if err != nil {
+		return err
+	}
+	server.mu.Lock()
+	for fingerprint := range server.cache {
+		if !kept[fingerprint] {
+			delete(server.cache, fingerprint)
+		}
+	}
+	server.mu.Unlock()
+	return nil
+}
+
+// remember loads a retained on-disk record while holding cacheMu, so a
+// collector cannot evict it between validation and insertion into memory.
+func (server *Server) remember(fingerprint string) bool {
+	server.cacheMu.Lock()
+	defer server.cacheMu.Unlock()
+	record, err := server.loadLocked(fingerprint)
+	if err != nil {
+		return false
+	}
+	server.mu.Lock()
+	server.cache[fingerprint] = record
+	server.mu.Unlock()
+	return true
+}
+
+type cacheFile struct {
+	fingerprint string
+	created     time.Time
+	size        int64
+}
+
+func (server *Server) collectCacheLocked() (map[string]bool, error) {
+	entries, err := os.ReadDir(server.cacheDir)
+	if err != nil {
+		return nil, fmt.Errorf("read candidate cache: %w", err)
+	}
+	now := time.Now()
+	files := make([]cacheFile, 0, len(entries))
+	for _, entry := range entries {
+		fingerprint, ok := cacheFilename(entry.Name())
+		if !ok {
+			continue
+		}
+		info, infoErr := entry.Info()
+		if infoErr != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() > ipc.MaxReplyBytes {
+			server.removeCachePathLocked(fingerprint, &server.cacheStatus.CorruptRemoved)
+			continue
+		}
+		content, readErr := os.ReadFile(server.cachePath(fingerprint))
+		var record Record
+		if readErr != nil || json.Unmarshal(content, &record) != nil || !validRecord(record, fingerprint) {
+			server.removeCachePathLocked(fingerprint, &server.cacheStatus.CorruptRemoved)
+			continue
+		}
+		created := record.CreatedAt
+		if created.IsZero() {
+			created = info.ModTime()
+		}
+		if now.Sub(created) > server.settings.CacheMaxAge {
+			server.removeCachePathLocked(fingerprint, &server.cacheStatus.ExpiredRemoved)
+			continue
+		}
+		files = append(files, cacheFile{fingerprint: fingerprint, created: created, size: info.Size()})
+	}
+	sort.Slice(files, func(left, right int) bool {
+		if files[left].created.Equal(files[right].created) {
+			return files[left].fingerprint < files[right].fingerprint
+		}
+		return files[left].created.Before(files[right].created)
+	})
+	kept := make(map[string]bool, len(files))
+	var bytes int64
+	for _, file := range files {
+		bytes += file.size
+	}
+	for index, file := range files {
+		remaining := len(files) - index
+		if remaining > server.settings.CacheMaxRecords || bytes > server.settings.CacheMaxBytes {
+			server.removeCachePathLocked(file.fingerprint, &server.cacheStatus.CapacityRemoved)
+			bytes -= file.size
+			continue
+		}
+		kept[file.fingerprint] = true
+	}
+	server.cacheStatus.Entries = len(kept)
+	server.cacheStatus.Bytes = bytes
+	return kept, nil
+}
+
+func (server *Server) discardRecord(fingerprint string, stale bool) {
+	server.cacheMu.Lock()
+	if stale {
+		server.removeCachePathLocked(fingerprint, &server.cacheStatus.StaleDiscarded)
+	} else {
+		server.removeCachePathLocked(fingerprint, &server.cacheStatus.ExpiredRemoved)
+	}
+	server.cacheMu.Unlock()
+	server.mu.Lock()
+	delete(server.cache, fingerprint)
+	server.mu.Unlock()
+}
+
+func (server *Server) discardExpired(fingerprint string) { server.discardRecord(fingerprint, false) }
+
+func (server *Server) removeCachePathLocked(fingerprint string, counter *int) {
+	info, _ := os.Lstat(server.cachePath(fingerprint))
+	if err := os.Remove(server.cachePath(fingerprint)); err == nil {
+		*counter++
+		if server.cacheStatus.Entries > 0 {
+			server.cacheStatus.Entries--
+		}
+		if info != nil && info.Mode().IsRegular() {
+			server.cacheStatus.Bytes -= info.Size()
+			if server.cacheStatus.Bytes < 0 {
+				server.cacheStatus.Bytes = 0
+			}
+		}
+	}
+}
+
+func (server *Server) expired(record Record) bool {
+	return record.CreatedAt.IsZero() || time.Since(record.CreatedAt) > server.settings.CacheMaxAge
+}
+
+func validRecord(record Record, fingerprint string) bool {
+	if record.Fingerprint != fingerprint || record.Repository == "" || record.Worktree == "" || record.CreatedAt.IsZero() || len(record.Candidates) == 0 || len(record.Candidates) > candidate.MaxCandidates {
+		return false
+	}
+	for index, value := range record.Candidates {
+		if value.Rank != index || !candidate.Valid(value) {
+			return false
+		}
+	}
+	return true
+}
+
+func cacheFilename(name string) (string, bool) {
+	if !strings.HasSuffix(name, ".json") || len(name) != 69 {
+		return "", false
+	}
+	fingerprint := strings.TrimSuffix(name, ".json")
+	for _, character := range fingerprint {
+		if !(character >= '0' && character <= '9') && !(character >= 'a' && character <= 'f') {
+			return "", false
+		}
+	}
+	return fingerprint, true
 }
 
 func prepareSocket(socket string) (bool, error) {

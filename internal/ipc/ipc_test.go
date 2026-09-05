@@ -32,3 +32,13 @@ func TestReadRejectsOversizedAndMalformedMessages(t *testing.T) {
 		t.Fatal("malformed JSON accepted")
 	}
 }
+
+func TestReadRejectsTruncatedFrame(t *testing.T) {
+	var header [4]byte
+	binary.BigEndian.PutUint32(header[:], 10)
+	buffer := bytes.NewBuffer(header[:])
+	buffer.WriteString("{}")
+	if _, err := ReadRequest(buffer); err == nil {
+		t.Fatal("truncated request accepted")
+	}
+}

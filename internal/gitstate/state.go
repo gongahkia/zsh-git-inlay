@@ -135,44 +135,71 @@ func writeTree(ctx context.Context, cwd, gitDir string) (string, error) {
 	}
 	defer os.RemoveAll(temporaryDir)
 	indexPath := filepath.Join(temporaryDir, "index")
-	if err := copyIndex(filepath.Join(gitDir, "index"), indexPath); err != nil {
+	if err := copyIndex(gitDir, temporaryDir); err != nil {
 		return "", err
 	}
 	return gitWithIndex(ctx, cwd, indexPath, "write-tree")
 }
 
-func copyIndex(sourcePath, destinationPath string) error {
+func copyIndex(gitDir, destinationDir string) error {
+	var copied int64
+	copyFile := func(name string) error {
+		size, err := copyIndexFile(filepath.Join(gitDir, name), filepath.Join(destinationDir, name), maxIndexBytes-copied)
+		if err != nil {
+			return err
+		}
+		copied += size
+		return nil
+	}
+	if err := copyFile("index"); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(gitDir)
+	if err != nil {
+		return fmt.Errorf("read Git directory for split index: %w", err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "sharedindex.") {
+			if err := copyFile(entry.Name()); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func copyIndexFile(sourcePath, destinationPath string, remaining int64) (int64, error) {
 	info, err := os.Lstat(sourcePath)
 	if os.IsNotExist(err) {
-		return nil // Git treats a missing alternate index as an empty index.
+		return 0, nil // Git treats a missing alternate index as an empty index.
 	}
 	if err != nil {
-		return fmt.Errorf("inspect Git index: %w", err)
+		return 0, fmt.Errorf("inspect Git index: %w", err)
 	}
 	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("Git index is not a regular file")
+		return 0, fmt.Errorf("Git index is not a regular file")
 	}
-	if info.Size() > maxIndexBytes {
-		return fmt.Errorf("Git index exceeds %d byte prototype limit", maxIndexBytes)
+	if info.Size() > remaining {
+		return 0, fmt.Errorf("Git index and shared indexes exceed %d byte prototype limit", maxIndexBytes)
 	}
 	source, err := os.Open(sourcePath)
 	if err != nil {
-		return fmt.Errorf("open Git index: %w", err)
+		return 0, fmt.Errorf("open Git index: %w", err)
 	}
 	defer source.Close()
 	destination, err := os.OpenFile(destinationPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
-		return fmt.Errorf("create private index copy: %w", err)
+		return 0, fmt.Errorf("create private index copy: %w", err)
 	}
 	_, copyErr := io.Copy(destination, source)
 	closeErr := destination.Close()
 	if copyErr != nil {
-		return fmt.Errorf("copy Git index: %w", copyErr)
+		return 0, fmt.Errorf("copy Git index: %w", copyErr)
 	}
 	if closeErr != nil {
-		return fmt.Errorf("close private index copy: %w", closeErr)
+		return 0, fmt.Errorf("close private index copy: %w", closeErr)
 	}
-	return nil
+	return info.Size(), nil
 }
 
 func git(ctx context.Context, cwd string, args ...string) (string, error) {

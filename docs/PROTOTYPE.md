@@ -61,4 +61,4 @@ Press the normal autosuggestion forward-character/end-of-line binding to accept,
 - Explicit configured shell aliases and Git configuration aliases are not implemented. Canonical `git commit` forms are the supported grammar; executable Git aliases are never run.
 - The fallback runtime cache is private but less ideal than a correctly configured `XDG_RUNTIME_DIR`; its parent-directory trust follows local XDG permissions.
 - No real terminal-pixel assertion is in CI; the strategy/widget contract and manual PTY procedure cover that boundary.
-- Git cannot provide a non-blocking atomic read lock across final fingerprint validation and cache rename. A narrow post-check race can retain an obsolete cache record, but exact lookup rejects it before rendering; see the architecture document for the deliberate tradeoff.
+- Git cannot provide a non-blocking atomic read lock across final fingerprint validation and cache rename. A narrow post-check race can retain an obsolete cache record, but exact lookup rejects it before rendering and bounded record/byte/age retention removes it; see the architecture document for the deliberate tradeoff.

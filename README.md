@@ -47,6 +47,11 @@ idle_timeout = "15m"
 max_active_repositories = 32
 max_generation_concurrency = 2
 
+[cache]
+max_records = 512
+max_bytes = 33554432
+max_age = "168h"
+
 [zsh]
 cycle_keybinding = "^Xg"
 
@@ -55,6 +60,12 @@ verbose = false
 ```
 
 Values are schema-validated; unknown keys are rejected. A repository may optionally contain `.zsh-git-inlay.toml` with only `[commit]` `convention`, `types`, `scopes`, and `line_length` keys. Its content influences the fingerprint, but it never executes and cannot configure a provider, activity collection, credentials, permissions, or command hooks.
+
+Candidate storage is bounded by `cache.max_records`, `cache.max_bytes`, and
+`cache.max_age`. The defaults retain at most 512 candidate records, 32 MiB, and
+seven days. Startup and publication remove malformed, expired, and
+over-capacity records; `zsh-git-inlay status --json` reports the resulting
+storage and removal counters without printing candidate content.
 
 The runtime socket defaults to `$XDG_RUNTIME_DIR/zsh-git-inlay/daemon.sock`; when that is unavailable, it uses a private XDG cache fallback. `ZSH_GIT_INLAY_RUNTIME_DIR` and `ZSH_GIT_INLAY_CACHE_DIR` are test and troubleshooting overrides.
 

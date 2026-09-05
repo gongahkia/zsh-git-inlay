@@ -13,7 +13,7 @@ func TestLoadValidatesGlobalSettings(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte("[daemon]\nidle_timeout = \"50ms\"\nmax_active_repositories = 3\nmax_generation_concurrency = 1\n[zsh]\ncycle_keybinding = \"^Xh\"\n[diagnostics]\nverbose = true\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("[daemon]\nidle_timeout = \"50ms\"\nmax_active_repositories = 3\nmax_generation_concurrency = 1\n[cache]\nmax_records = 4\nmax_bytes = 65536\nmax_age = \"1h\"\n[zsh]\ncycle_keybinding = \"^Xh\"\n[diagnostics]\nverbose = true\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("XDG_CONFIG_HOME", root)
@@ -21,7 +21,7 @@ func TestLoadValidatesGlobalSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if settings.IdleTimeout != 50*time.Millisecond || settings.MaxRepositories != 3 || settings.MaxGenerationJobs != 1 || settings.CycleKeybinding != "^Xh" || !settings.Verbose || settings.Version == "default" {
+	if settings.IdleTimeout != 50*time.Millisecond || settings.MaxRepositories != 3 || settings.MaxGenerationJobs != 1 || settings.CacheMaxRecords != 4 || settings.CacheMaxBytes != 65536 || settings.CacheMaxAge != time.Hour || settings.CycleKeybinding != "^Xh" || !settings.Verbose || settings.Version == "default" {
 		t.Fatalf("settings = %#v", settings)
 	}
 }
