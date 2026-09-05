@@ -219,6 +219,34 @@ func TestActivitySignalsReachContextAndRevocationInvalidatesLookup(t *testing.T)
 	}
 }
 
+func TestActivityGitStateReportsOnlyObservedIndexAndHeadChanges(t *testing.T) {
+	server, _ := testServer(t)
+	server.activity = activity.New(activity.DefaultSettings(), func() (activity.Permissions, error) { return activity.Permissions{Activity: true}, nil })
+	repository := daemonRepository(t, "activity.go")
+	if reply := server.observeActivityGit(repository, false); reply.Status != "ready" {
+		t.Fatalf("initial Git state = %#v", reply)
+	}
+	if err := os.WriteFile(filepath.Join(repository, "second.go"), []byte("package second\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	daemonGit(t, repository, "add", "second.go")
+	if reply := server.observeActivityGit(repository, false); reply.Status != "ready" {
+		t.Fatalf("index state = %#v", reply)
+	}
+	daemonGit(t, repository, "commit", "-qm", "feat: establish baseline")
+	if reply := server.observeActivityGit(repository, true); reply.Status != "ready" {
+		t.Fatalf("head state = %#v", reply)
+	}
+	state, err := gitstate.Snapshot(context.Background(), repository)
+	if err != nil || state.RepoID == "" || state.WorktreeID == "" {
+		t.Fatalf("final Git state = %#v err=%v", state, err)
+	}
+	signals := server.activity.Provenance(state.RepoID, state.WorktreeID).Signals
+	if len(signals) != 3 || signals[0].Kind != "git.index_changed" || signals[1].Kind != "git.head_changed" || signals[2].Kind != "git.commit_completed" {
+		t.Fatalf("Git state signals = %#v", signals)
+	}
+}
+
 type failingProvider struct{}
 
 func (failingProvider) Metadata() provider.Metadata {

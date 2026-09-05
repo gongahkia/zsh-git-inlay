@@ -227,3 +227,21 @@ must remain off the lookup path.
   ms/op, deterministic generation 1.52 ms/op, and warm socket lookup 0.099
   ms/op, all within the 1 ms/25 ms/0.25 ms budgets. Doctor found no running
   daemon or reachable Ollama; no model download occurred.
+- 2026-09-05: completed Milestone 8's opt-in Zsh collection. `preexec` and
+  `precmd` hooks classify only a fixed allowlist of Git, test, and build command
+  forms; they retain no command text or arguments and asynchronously send only
+  class, exit status, and duration. Test/build completion events preserve
+  failures as bounded status evidence. The daemon compares actual Git
+  index-tree and HEAD identities before emitting transition events, and emits
+  `git.commit_completed` only when a successful classified commit also changed
+  HEAD. Permission is checked before the event client snapshots Git, and hook
+  client/socket failures are ignored. Transparent stdout/stderr capture was
+  rejected because redirection or terminal interception would alter command
+  semantics; no output permission or capture path exists. The real-Zsh
+  integration now exercises the hooks, secret-bearing command syntax,
+  transition detection, and unload cleanup. Focused race tests plus `go test
+  ./...`, `make test`, and `make lint` passed. Benchmark results were parser
+  0.311 us/op, exact snapshot 9.36 ms/op, deterministic generation 1.82
+  ms/op, and warm socket lookup 0.117 ms/op, within the 1 ms/25 ms/0.25 ms
+  budgets. Doctor found no running daemon or reachable Ollama; no model
+  download occurred.

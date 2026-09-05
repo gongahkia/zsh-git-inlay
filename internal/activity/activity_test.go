@@ -134,6 +134,32 @@ func TestActivityRejectsExpiredEventsAndBoundsScopes(t *testing.T) {
 	}
 }
 
+func TestObserveGitRecordsOnlyActualTransitionsAndExpiresItsBaseline(t *testing.T) {
+	store := New(Settings{Retention: time.Minute, MaxEvents: 8, MaxScopes: 2}, func() (Permissions, error) { return Permissions{Activity: true}, nil })
+	now := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
+	store.now = func() time.Time { return now }
+	if decisions := store.ObserveGit(repositoryA, worktreeA, "head-1", "index-1", false); len(decisions) != 1 || decisions[0].Reason != "baseline recorded" {
+		t.Fatalf("baseline = %#v", decisions)
+	}
+	if decisions := store.ObserveGit(repositoryA, worktreeA, "head-1", "index-1", false); len(decisions) != 1 || decisions[0].Reason != "no Git transition" {
+		t.Fatalf("unchanged state = %#v", decisions)
+	}
+	if decisions := store.ObserveGit(repositoryA, worktreeA, "head-1", "index-2", false); len(decisions) != 1 || decisions[0].Reason != "index changed" {
+		t.Fatalf("index transition = %#v", decisions)
+	}
+	if decisions := store.ObserveGit(repositoryA, worktreeA, "head-2", "index-3", true); len(decisions) != 3 {
+		t.Fatalf("head/index transition = %#v", decisions)
+	}
+	signals := store.Provenance(repositoryA, worktreeA).Signals
+	if len(signals) != 3 || signals[0].Kind != "git.index_changed" || signals[0].Count != 2 || signals[1].Kind != "git.head_changed" || signals[2].Kind != "git.commit_completed" {
+		t.Fatalf("Git transition signals = %#v", signals)
+	}
+	now = now.Add(2 * time.Minute)
+	if decisions := store.ObserveGit(repositoryA, worktreeA, "head-2", "index-3", false); len(decisions) != 1 || decisions[0].Reason != "baseline recorded" {
+		t.Fatalf("expired baseline = %#v", decisions)
+	}
+}
+
 func TestPermissionRecordIsPrivateAndStrict(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "permissions.json")
 	if err := SavePermissions(path, Permissions{Activity: true}); err != nil {

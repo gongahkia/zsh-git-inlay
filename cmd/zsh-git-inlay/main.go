@@ -494,9 +494,22 @@ func permissionsCommand(arguments []string) error {
 }
 
 func activityCommand(arguments []string) error {
-	if len(arguments) == 0 || (arguments[0] != "inspect" && arguments[0] != "clear") {
+	if len(arguments) == 0 {
 		return errors.New("usage: zsh-git-inlay activity {inspect|clear} [--cwd <directory>] [--json]")
 	}
+	switch arguments[0] {
+	case "inspect", "clear":
+		return activityAdmin(arguments)
+	case "emit":
+		return activityEmit(arguments[1:])
+	case "git-state":
+		return activityGitState(arguments[1:])
+	default:
+		return errors.New("usage: zsh-git-inlay activity {inspect|clear} [--cwd <directory>] [--json]")
+	}
+}
+
+func activityAdmin(arguments []string) error {
 	flags, cwdFlag, jsonOutput := commonFlags("activity " + arguments[0])
 	if err := flags.Parse(arguments[1:]); err != nil {
 		return err
@@ -538,6 +551,96 @@ func activityCommand(arguments []string) error {
 		fmt.Printf("excluded %s: %d\n", reason, count)
 	}
 	return nil
+}
+
+func activityEmit(arguments []string) error {
+	flags := flag.NewFlagSet("activity emit", flag.ContinueOnError)
+	flags.SetOutput(ioDiscard{})
+	cwdFlag := flags.String("cwd", "", "repository working directory")
+	source := flags.String("source", "shell", "event source")
+	kind := flags.String("kind", "", "event kind")
+	sensitivity := flags.String("sensitivity", string(activity.Private), "event sensitivity")
+	var values stringValues
+	flags.Var(&values, "data", "bounded key=value event field")
+	if err := flags.Parse(arguments); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 || *kind == "" {
+		return errors.New("usage: zsh-git-inlay activity emit --cwd <directory> --source <source> --kind <kind> [--sensitivity <public|private|secret>] [--data key=value]")
+	}
+	enabled, err := activityEnabled()
+	if err != nil || !enabled {
+		return err
+	}
+	cwd, err := resolveCWD(*cwdFlag)
+	if err != nil {
+		return err
+	}
+	snapshotContext, cancel := gitstate.WithTimeout()
+	defer cancel()
+	state, err := gitstate.Snapshot(snapshotContext, cwd)
+	if err != nil {
+		return err
+	}
+	if state.Root == "" || state.RepoID == "" || state.WorktreeID == "" {
+		return nil
+	}
+	data := make(map[string]string, len(values))
+	for _, value := range values {
+		key, field, found := strings.Cut(value, "=")
+		if !found || key == "" || field == "" || data[key] != "" {
+			return errors.New("activity data must use unique nonempty key=value fields")
+		}
+		data[key] = field
+	}
+	event := activity.Event{Schema: activity.SchemaVersion, Repository: state.RepoID, Worktree: state.WorktreeID, Source: *source, Kind: *kind, Timestamp: time.Now().UTC(), Data: data, Sensitivity: activity.Sensitivity(*sensitivity)}
+	reply, err := call(ipc.Request{Version: ipc.Version, Operation: "event", CWD: cwd, Event: &event}, 100*time.Millisecond)
+	if err != nil {
+		return err
+	}
+	if reply.Status != "accepted" && reply.Status != "rejected" {
+		return fmt.Errorf("activity event %s: %s", reply.Status, reply.Error)
+	}
+	return nil
+}
+
+func activityGitState(arguments []string) error {
+	flags, cwdFlag, _ := commonFlags("activity git-state")
+	commit := flags.Bool("commit", false, "record a completed commit only if HEAD changed")
+	if err := flags.Parse(arguments); err != nil || flags.NArg() != 0 {
+		if err != nil {
+			return err
+		}
+		return errors.New("usage: zsh-git-inlay activity git-state [--cwd <directory>]")
+	}
+	enabled, err := activityEnabled()
+	if err != nil || !enabled {
+		return err
+	}
+	cwd, err := resolveCWD(*cwdFlag)
+	if err != nil {
+		return err
+	}
+	reply, err := call(ipc.Request{Version: ipc.Version, Operation: "activity_git_state", CWD: cwd, GitCommit: *commit}, 100*time.Millisecond)
+	if err != nil {
+		return err
+	}
+	if reply.Status != "ready" && reply.Status != "rejected" {
+		return fmt.Errorf("activity Git state %s: %s", reply.Status, reply.Error)
+	}
+	return nil
+}
+
+func activityEnabled() (bool, error) {
+	directory, err := runtimepath.DataDir()
+	if err != nil {
+		return false, err
+	}
+	permissions, err := activity.LoadPermissions(activity.PermissionsPath(directory))
+	if err != nil {
+		return false, err
+	}
+	return permissions.Activity, nil
 }
 
 func daemonCommand(arguments []string) error {
@@ -690,5 +793,13 @@ func printJSON(value any) error {
 type ioDiscard struct{}
 
 func (ioDiscard) Write(bytes []byte) (int, error) { return len(bytes), nil }
+
+type stringValues []string
+
+func (values *stringValues) String() string { return strings.Join(*values, ",") }
+func (values *stringValues) Set(value string) error {
+	*values = append(*values, value)
+	return nil
+}
 
 var _ = strings.Builder{}

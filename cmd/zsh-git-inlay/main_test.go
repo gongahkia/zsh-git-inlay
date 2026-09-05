@@ -14,6 +14,7 @@ import (
 	"github.com/gongahkia/zsh-git-inlay/internal/activity"
 	"github.com/gongahkia/zsh-git-inlay/internal/config"
 	"github.com/gongahkia/zsh-git-inlay/internal/daemon"
+	"github.com/gongahkia/zsh-git-inlay/internal/ipc"
 )
 
 func TestContextCommandReportsSummaryWithoutSourceContent(t *testing.T) {
@@ -110,6 +111,59 @@ func TestPermissionsCommandsPersistOnlyTheActivityGrant(t *testing.T) {
 	}
 	if err := run([]string{"permissions", "enable", "output"}); err == nil {
 		t.Fatal("unsupported output permission was accepted")
+	}
+}
+
+func TestActivityEmitCommandUsesConsentAndRedactsProducerData(t *testing.T) {
+	repository := t.TempDir()
+	runtimeDirectory, cacheDirectory, dataDirectory := filepath.Join(t.TempDir(), "runtime"), filepath.Join(t.TempDir(), "cache"), filepath.Join(t.TempDir(), "data")
+	t.Setenv("ZSH_GIT_INLAY_RUNTIME_DIR", runtimeDirectory)
+	t.Setenv("ZSH_GIT_INLAY_CACHE_DIR", cacheDirectory)
+	t.Setenv("ZSH_GIT_INLAY_DATA_DIR", dataDirectory)
+	commandGit(t, repository, "init", "-q", "-b", "main")
+	commandGit(t, repository, "config", "user.name", "Test")
+	commandGit(t, repository, "config", "user.email", "test@example.invalid")
+	if err := os.WriteFile(filepath.Join(repository, "file.go"), []byte("package file\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	commandGit(t, repository, "add", "file.go")
+	if err := run([]string{"activity", "emit", "--cwd", repository, "--kind", "test.completed", "--data", "token=ghp_not_retained"}); err != nil {
+		t.Fatalf("disabled emitter = %v", err)
+	}
+	if err := activity.SavePermissions(activity.PermissionsPath(dataDirectory), activity.Permissions{Activity: true}); err != nil {
+		t.Fatal(err)
+	}
+	serverContext, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- daemon.Serve(serverContext, config.Default(), "") }()
+	defer func() {
+		cancel()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Error(err)
+			}
+		case <-time.After(time.Second):
+			t.Error("daemon did not stop")
+		}
+	}()
+	deadline := time.Now().Add(time.Second)
+	for {
+		if _, err := call(ipc.Request{Version: ipc.Version, Operation: "status"}, 20*time.Millisecond); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("daemon did not start")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if err := run([]string{"activity", "emit", "--cwd", repository, "--kind", "test.completed", "--data", "token=ghp_not_retained"}); err != nil {
+		t.Fatalf("consented emitter = %v", err)
+	}
+	output, err := captureCommandOutput(func() error { return run([]string{"activity", "inspect", "--cwd", repository, "--json"}) })
+	if err != nil || strings.Contains(output, "ghp_not_retained") || !strings.Contains(output, "[REDACTED]") || !strings.Contains(output, "test.completed") {
+		t.Fatalf("activity inspection output=%q err=%v", output, err)
 	}
 }
 

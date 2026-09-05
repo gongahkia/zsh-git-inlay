@@ -25,9 +25,11 @@ The following are product decisions, not implemented features in this milestone:
 - Cloud providers require explicit user capability grants and, after permission, may receive equivalent selected context.
 - Activity collection is disabled by default and has a user-only grant,
   user-configurable memory-only retention, per-repository/worktree isolation,
-  TTL, redaction, and bounded derived-signal context. The current plugin has
-  no producer hook yet; commands, exit statuses, and command output remain
-  uncollected. Output capture will require a separate permission.
+  TTL, redaction, and bounded derived-signal context. Granted Zsh hooks record
+  only allowlisted command classes, exit status, duration, and actual Git
+  transitions; command arguments and output remain uncollected. Transparent
+  output capture is rejected and any future explicit output path requires a
+  separate permission.
 - Relevance filtering and redaction occur before inference. The current
   compiler includes bounded staged patch/paths, declarations, root manifests,
   repository subjects, staged convention, branch, issue evidence, and only

@@ -13,6 +13,7 @@ project_dir="${0:A:h:h}"
 trap 'command "$ZSH_GIT_INLAY_BIN" daemon stop >/dev/null 2>&1 || true; command rm -rf -- "$root"' EXIT
 export ZSH_GIT_INLAY_RUNTIME_DIR="$root/runtime"
 export ZSH_GIT_INLAY_CACHE_DIR="$root/cache"
+export ZSH_GIT_INLAY_DATA_DIR="$root/data"
 
 repo="$root/repository"
 command git -C "$root" init -q -b main repository
@@ -69,6 +70,21 @@ _zsh_autosuggest_strategy_git-inlay 'echo unaffected'
 diagnostic=$(command "$ZSH_GIT_INLAY_BIN" suggest --cwd "$repo" --buffer 'git merge' --json)
 [[ $diagnostic == *'unsupported_command'* ]] || { print -u2 -- 'unsupported syntax diagnostic was unclear'; exit 1 }
 
+command "$ZSH_GIT_INLAY_BIN" permissions enable activity >/dev/null
+command "$ZSH_GIT_INLAY_BIN" activity git-state --cwd "$repo"
+print -r -- 'activity transition' >> cache.txt
+_zsh_git_inlay_activity_preexec 'git add cache.txt --token=DO-NOT-RETAIN'
+command git add cache.txt
+_zsh_git_inlay_observe
+_zsh_git_inlay_activity_preexec 'go test ./... --token=DO-NOT-RETAIN'
+_zsh_git_inlay_activity_finish 1
+attempts=0
+until activity_report=$(command "$ZSH_GIT_INLAY_BIN" activity inspect --cwd "$repo" --json 2>/dev/null) && [[ $activity_report == *'shell.command_started'* && $activity_report == *'shell.command_finished'* && $activity_report == *'git.index_changed'* && $activity_report == *'test.completed'* ]]; do
+  (( attempts++ < 100 )) || { print -u2 -- 'activity hooks did not emit bounded events'; exit 1 }
+  sleep 0.02
+done
+[[ $activity_report != *'DO-NOT-RETAIN'* && $activity_report == *'"class": "git-index"'* ]] || { print -u2 -- 'activity hook retained command arguments'; exit 1 }
+
 print -r -- 'new staged state' > "$repo/extra.txt"
 command git -C "$repo" add extra.txt
 suggestion=''
@@ -98,6 +114,7 @@ _zsh_autosuggest_strategy_git-inlay "$base"
 
 zsh_git_inlay_unload
 [[ ${ZSH_AUTOSUGGEST_STRATEGY[(Ie)git-inlay]} == 0 ]] || { print -u2 -- 'unload left strategy registered'; exit 1 }
+(( ! ${+functions[_zsh_git_inlay_activity_preexec]} )) || { print -u2 -- 'unload left activity hook registered'; exit 1 }
 
 missing_result=$(zsh -dfc 'source "'$project_dir'/zsh-git-inlay.plugin.zsh"; print -r -- "$ZSH_GIT_INLAY_DEPENDENCY_ERROR"' 2>&1)
 [[ $missing_result == *'requires zsh-autosuggestions'* ]] || { print -u2 -- 'missing dependency diagnostic was not actionable'; exit 1 }

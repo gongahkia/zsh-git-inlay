@@ -105,8 +105,11 @@ ollama`; see [the context compiler guide](docs/CONTEXT.md).
 
 Activity context is disabled until the user grants it with `zsh-git-inlay
 permissions enable activity`. It remains memory-only, repository/worktree
-scoped, and feeds providers only bounded derived event-kind counts. It does not
-capture command output. See [the local activity protocol](docs/ACTIVITY.md).
+scoped, and feeds providers only bounded derived event-kind counts. With that
+grant, safe Zsh hooks classify recognized command/test/build and Git transitions
+without retaining command arguments or output. Transparent command-output
+capture is intentionally unsupported. See [the local activity
+protocol](docs/ACTIVITY.md).
 
 The runtime socket defaults to `$XDG_RUNTIME_DIR/zsh-git-inlay/daemon.sock`; when that is unavailable, it uses a private XDG cache fallback. `ZSH_GIT_INLAY_RUNTIME_DIR` and `ZSH_GIT_INLAY_CACHE_DIR` are test and troubleshooting overrides.
 

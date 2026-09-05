@@ -104,9 +104,12 @@ type Provenance struct {
 }
 
 type scopedEvents struct {
-	events   []Event
-	excluded map[string]int
-	seen     time.Time
+	events      []Event
+	excluded    map[string]int
+	seen        time.Time
+	head        string
+	indexTree   string
+	gitObserved bool
 }
 
 type Store struct {
@@ -138,6 +141,9 @@ func (store *Store) Configure(settings Settings) {
 			store.scopes[key] = value
 		}
 	}
+	for len(store.scopes) > store.settings.MaxScopes {
+		store.dropOldestScopeLocked()
+	}
 }
 
 // Ingest checks the durable user grant for every producer event, so a revoke
@@ -164,12 +170,7 @@ func (store *Store) Ingest(event Event) Decision {
 		store.noteExcludedLocked(key, "expired event")
 		return Decision{Reason: "expired event"}
 	}
-	value := store.scopeLocked(key, now)
-	value.events = append(value.events, event)
-	if len(value.events) > store.settings.MaxEvents {
-		value.events = append([]Event(nil), value.events[len(value.events)-store.settings.MaxEvents:]...)
-	}
-	value.seen = now
+	value := store.appendEventLocked(store.scopeLocked(key, now), event)
 	store.scopes[key] = value
 	return Decision{Accepted: true, Reason: "accepted"}
 }
@@ -189,6 +190,51 @@ func (store *Store) Clear(repository, worktree string) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	delete(store.scopes, scope(repository, worktree))
+}
+
+// Enabled reports the current durable grant. It clears retained state when a
+// grant is absent or invalid, just like Ingest and Provenance.
+func (store *Store) Enabled() bool { return store.enabled() }
+
+// ObserveGit records only actual Git state transitions. The compared IDs stay
+// in bounded memory as a baseline and never enter event data or provider input.
+func (store *Store) ObserveGit(repository, worktree, head, indexTree string, commit bool) []Decision {
+	if !store.enabled() {
+		return []Decision{{Reason: "activity permission is disabled"}}
+	}
+	if repository == "" || worktree == "" || head == "" || indexTree == "" || validIdentity(Event{Repository: repository, Worktree: worktree}) != nil {
+		return []Decision{{Reason: "invalid Git state"}}
+	}
+	key := scope(repository, worktree)
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	now := store.now()
+	store.pruneLocked(now)
+	value := store.scopeLocked(key, now)
+	if !value.gitObserved {
+		value.head, value.indexTree, value.gitObserved, value.seen = head, indexTree, true, now
+		store.scopes[key] = value
+		return []Decision{{Accepted: true, Reason: "baseline recorded"}}
+	}
+	decisions := make([]Decision, 0, 3)
+	if value.indexTree != indexTree {
+		value = store.appendEventLocked(value, Event{Schema: SchemaVersion, Repository: repository, Worktree: worktree, Source: "shell", Kind: "git.index_changed", Timestamp: now.UTC(), Sensitivity: Private})
+		decisions = append(decisions, Decision{Accepted: true, Reason: "index changed"})
+	}
+	if value.head != head {
+		value = store.appendEventLocked(value, Event{Schema: SchemaVersion, Repository: repository, Worktree: worktree, Source: "shell", Kind: "git.head_changed", Timestamp: now.UTC(), Sensitivity: Private})
+		decisions = append(decisions, Decision{Accepted: true, Reason: "head changed"})
+		if commit {
+			value = store.appendEventLocked(value, Event{Schema: SchemaVersion, Repository: repository, Worktree: worktree, Source: "shell", Kind: "git.commit_completed", Timestamp: now.UTC(), Sensitivity: Private})
+			decisions = append(decisions, Decision{Accepted: true, Reason: "commit completed"})
+		}
+	}
+	value.head, value.indexTree, value.gitObserved, value.seen = head, indexTree, true, now
+	store.scopes[key] = value
+	if len(decisions) == 0 {
+		return []Decision{{Accepted: true, Reason: "no Git transition"}}
+	}
+	return decisions
 }
 
 // Provenance returns a stable, bounded representation for provider context.
@@ -248,16 +294,22 @@ func (store *Store) scopeLocked(key string, now time.Time) scopedEvents {
 		return value
 	}
 	if len(store.scopes) >= store.settings.MaxScopes {
-		oldestKey := ""
-		var oldest time.Time
-		for candidate, value := range store.scopes {
-			if oldestKey == "" || value.seen.Before(oldest) {
-				oldestKey, oldest = candidate, value.seen
-			}
-		}
-		delete(store.scopes, oldestKey)
+		store.dropOldestScopeLocked()
 	}
 	return scopedEvents{excluded: map[string]int{}, seen: now}
+}
+
+func (store *Store) dropOldestScopeLocked() {
+	oldestKey := ""
+	var oldest time.Time
+	for candidate, value := range store.scopes {
+		if oldestKey == "" || value.seen.Before(oldest) {
+			oldestKey, oldest = candidate, value.seen
+		}
+	}
+	if oldestKey != "" {
+		delete(store.scopes, oldestKey)
+	}
 }
 
 func (store *Store) pruneLocked(now time.Time) {
@@ -270,12 +322,24 @@ func (store *Store) pruneLocked(now time.Time) {
 			}
 		}
 		value.events = kept
-		if len(value.events) == 0 && len(value.excluded) == 0 {
+		if value.seen.Before(cutoff) {
+			value.head, value.indexTree, value.gitObserved = "", "", false
+		}
+		if len(value.events) == 0 && len(value.excluded) == 0 && !value.gitObserved {
 			delete(store.scopes, key)
 			continue
 		}
 		store.scopes[key] = value
 	}
+}
+
+func (store *Store) appendEventLocked(value scopedEvents, event Event) scopedEvents {
+	value.events = append(value.events, event)
+	if len(value.events) > store.settings.MaxEvents {
+		value.events = append([]Event(nil), value.events[len(value.events)-store.settings.MaxEvents:]...)
+	}
+	value.seen = store.now()
+	return value
 }
 
 func normalize(settings Settings) Settings {

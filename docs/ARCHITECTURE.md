@@ -60,6 +60,14 @@ so lookup returns `activity_stale` rather than rendering a candidate generated
 under prior activity evidence. [ACTIVITY.md](ACTIVITY.md) documents the schema,
 redaction, retention, and administrative controls.
 
+When activity is granted, Zsh `preexec`/`precmd` hooks operate outside the ZLE
+strategy and asynchronously send only a fixed recognized command class, exit
+status, and duration. A separate asynchronous daemon operation compares actual
+Git index-tree and HEAD values before emitting Git transition events. The hooks
+never retain command arguments or redirect terminal output; failures are
+ignored. Transparent command-output capture is rejected because it would alter
+normal command or terminal semantics.
+
 Provider generation also stays behind the daemon boundary. Before invoking a
 provider, the daemon compiles bounded staged-only context with inspectable
 source and truncation reasons. The context fingerprint is part of the candidate

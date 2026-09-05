@@ -24,6 +24,7 @@ type Request struct {
 	Repository  string          `json:"repository_id,omitempty"`
 	Worktree    string          `json:"worktree_id,omitempty"`
 	Event       *activity.Event `json:"event,omitempty"`
+	GitCommit   bool            `json:"git_commit,omitempty"`
 }
 
 type Reply struct {

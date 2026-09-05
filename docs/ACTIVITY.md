@@ -1,9 +1,9 @@
 # Local activity protocol
 
 Activity is optional local evidence for the daemon. It is disabled by default,
-has no network or telemetry path, and is not collected by the current Zsh
-plugin. Future Zsh and Neovim producers use this protocol; neither changes the
-normal commit-message renderer or command execution path.
+has no network or telemetry path, and is collected by the Zsh plugin only after
+the user grant. Future Neovim producers use the same protocol. Neither changes
+the normal commit-message renderer or command execution path.
 
 Only a user command can change the durable activity grant. The private record
 is `$XDG_DATA_HOME/zsh-git-inlay/permissions.json` (or its data-directory
@@ -83,6 +83,33 @@ zsh-git-inlay activity clear --cwd .
 Inspection shows accepted, already-redacted events and aggregate rejection
 reasons. Rejected payload text is not retained merely to make it inspectable.
 `clear` deletes only the selected repository/worktree's memory state.
+
+## Zsh collection and rejected output capture
+
+The plugin's `preexec` hook classifies a command in memory and sends only a
+fixed class name. Its `precmd` hook sends the exit status and duration for that
+same recognized command. It recognizes Git commit/index commands and common
+Go, Cargo, pytest, Make, npm, pnpm, and Yarn test/build forms. Command text,
+arguments, environment, standard input, and output are not event fields. A
+successful `git commit` marks the following background state check as a commit;
+that check emits `git.commit_completed` only when it also observed a real HEAD
+transition. It emits `git.index_changed` or `git.head_changed` only on a real
+transition. Recognized test and build commands also emit `test.completed` or
+`build.completed` with the same bounded status and duration fields, including
+when the command fails.
+
+These hook-side calls are backgrounded. The event client checks the durable
+grant before taking a Git snapshot, and any client, socket, or daemon failure
+is ignored by the hook, so ordinary command execution and prompt rendering do
+not wait on collection. The normal autosuggestion lookup remains unchanged.
+
+Transparent stdout/stderr capture is deliberately rejected: wrapping arbitrary
+commands, redirecting terminal streams, or intercepting the terminal would
+alter command semantics and expose secrets. This milestone implements no output
+permission and no output capture. A future explicit tool-specific output path
+must add its own separate capability and preserve the bounded
+input/redaction/error-region/relevance/derived-signal sequence before it can
+submit an event.
 
 ## Inference boundary
 

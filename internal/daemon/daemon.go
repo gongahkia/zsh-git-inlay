@@ -224,6 +224,8 @@ func (server *Server) handle(connection net.Conn) {
 		reply = server.inspectActivity(request.CWD)
 	case "activity_clear":
 		reply = server.clearActivity(request.CWD)
+	case "activity_git_state":
+		reply = server.observeActivityGit(request.CWD, request.GitCommit)
 	case "stop":
 		reply = ipc.Reply{Version: ipc.Version, Status: "stopping"}
 		go server.Close()
@@ -510,6 +512,24 @@ func (server *Server) clearActivity(cwd string) ipc.Reply {
 	}
 	server.activity.Clear(state.RepoID, state.WorktreeID)
 	return ipc.Reply{Version: ipc.Version, Status: "cleared"}
+}
+
+func (server *Server) observeActivityGit(cwd string, commit bool) ipc.Reply {
+	if !server.activity.Enabled() {
+		return ipc.Reply{Version: ipc.Version, Status: "rejected", Error: "activity permission is disabled"}
+	}
+	state, reply := activityScope(cwd)
+	if reply != nil {
+		return *reply
+	}
+	if state.Head == "" || state.IndexTree == "" {
+		return ipc.Reply{Version: ipc.Version, Status: string(state.Availability), Error: "Git state is unavailable"}
+	}
+	payload, err := json.Marshal(server.activity.ObserveGit(state.RepoID, state.WorktreeID, state.Head, state.IndexTree, commit))
+	if err != nil {
+		return ipc.Reply{Version: ipc.Version, Status: "error", Error: err.Error()}
+	}
+	return ipc.Reply{Version: ipc.Version, Status: "ready", Payload: payload}
 }
 
 func activityScope(cwd string) (gitstate.State, *ipc.Reply) {
