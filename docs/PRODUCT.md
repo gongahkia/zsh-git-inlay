@@ -1,6 +1,6 @@
 # Product
 
-## Implemented prototype
+## Implemented V1
 
 `zsh-git-inlay` is one Zsh product. Its ordinary user interaction is unchanged Git syntax: type `git commit -m ` and let the required `zsh-autosuggestions` renderer show one prepared candidate. The user may accept with their ordinary autosuggestion binding, keep typing to constrain it, dismiss it, or press the configurable cycle binding to choose another already prepared candidate. There is no `git inlay` subcommand, Git wrapper, separate daemon product, editor frontend, menu, spinner, or TUI.
 
@@ -69,7 +69,7 @@ The following are implemented or settled product decisions:
   user-authored rather than being relabeled as grounded generated facts.
 
 VS Code, JetBrains, model fine-tuning, cross-device synchronization, dashboards,
-and CI enforcement are deferred. This prototype does not implement a managed
+and CI enforcement are deferred. This V1 does not implement a managed
 model distribution, output capture, other editor/LSP
 integrations,
 issue trackers, automatic staging, automatic commits, standalone ghost text,

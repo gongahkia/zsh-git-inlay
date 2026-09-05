@@ -118,7 +118,7 @@ of the staged fingerprint; the published record retains the effective policy
 for diagnostics. [POLICY.md](POLICY.md) documents the fixed security and
 configuration precedence.
 
-## Prototype provider and parser
+## Deterministic provider and parser
 
 The deterministic provider invokes `git diff --cached --name-status -z
 --find-renames`, bounds metadata to 64 KiB, and creates three ordered,

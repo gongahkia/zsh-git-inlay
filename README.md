@@ -1,6 +1,10 @@
 # zsh-git-inlay
 
-`zsh-git-inlay` is a local-first, Zsh-only prototype that prepares deterministic Git commit-message candidates for the current staged state. It renders no text itself: a `git-inlay` strategy registered with the required [zsh-autosuggestions](https://github.com/zsh-users/zsh-autosuggestions) dependency supplies the normal dimmed ghost text.
+`zsh-git-inlay` is a local-first, Zsh-only plugin that prepares Git
+commit-message candidates for the current staged state. It renders no text
+itself: a `git-inlay` strategy registered with the required
+[zsh-autosuggestions](https://github.com/zsh-users/zsh-autosuggestions)
+dependency supplies the normal dimmed ghost text.
 
 ```zsh
 git commit -m 'chore(cache): update 2 staged files'
@@ -169,13 +173,15 @@ evidence references are checked against staged context; deterministic checks
 are separated from heuristic fix/behavior signals. See [the grounding
 guide](docs/GROUNDING.md) for policy behavior and `explain` output.
 
-Build, test, lint, and benchmark the prototype with:
+Build, test, lint, and benchmark the V1 implementation with:
 
 ```zsh
 make build
 make test
 make lint
 make bench
+make test-soak
+make test-install
 ```
 
 The integration test uses a real Zsh process and the installed autosuggestions implementation to verify strategy registration, ghost-text strategy output, normal acceptance, cycling, stale rejection, no-staged behavior, dependency diagnostics, and absence of a `git()` override. See [docs/PROTOTYPE.md](docs/PROTOTYPE.md) for its renderer limitation and a manual PTY demonstration.
@@ -190,4 +196,11 @@ sh scripts/uninstall.sh --prefix "$HOME/.local"
 
 Optional cached candidates are under `$XDG_CACHE_HOME/zsh-git-inlay` (or `~/.cache/zsh-git-inlay`). Removing that directory is recoverable only from backups; it contains no repository content, only candidate metadata records.
 
-Further design, security, installation, and roadmap details are in [PRODUCT.md](docs/PRODUCT.md), [ARCHITECTURE.md](docs/ARCHITECTURE.md), [INSTALLATION.md](docs/INSTALLATION.md), [ACTIVITY.md](docs/ACTIVITY.md), [CLOUD.md](docs/CLOUD.md), [COMPOSE.md](docs/COMPOSE.md), [LEARNING.md](docs/LEARNING.md), [NEOVIM.md](docs/NEOVIM.md), and [THREAT-MODEL.md](docs/THREAT-MODEL.md).
+Further design, security, installation, reliability, configuration, privacy,
+and roadmap details are in [PRODUCT.md](docs/PRODUCT.md),
+[ARCHITECTURE.md](docs/ARCHITECTURE.md), [INSTALLATION.md](docs/INSTALLATION.md),
+[RELIABILITY.md](docs/RELIABILITY.md), [CONFIGURATION.md](docs/CONFIGURATION.md),
+[PRIVACY.md](docs/PRIVACY.md), [ACTIVITY.md](docs/ACTIVITY.md),
+[CLOUD.md](docs/CLOUD.md), [COMPOSE.md](docs/COMPOSE.md),
+[LEARNING.md](docs/LEARNING.md), [NEOVIM.md](docs/NEOVIM.md), and
+[THREAT-MODEL.md](docs/THREAT-MODEL.md).

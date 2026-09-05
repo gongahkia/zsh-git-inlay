@@ -27,10 +27,11 @@ applies. A total candidate line longer than `line_length` is rejected.
 an uppercase first letter. Uppercase subject text remains shell-safe under the
 existing printable-message floor. Normal suggestions are subject-only, so a
 repository that requires a body intentionally gets no normal candidate. The
-user may instead invoke `zsh-git-inlay compose` for an already prepared,
-grounded candidate: it proposes a policy-wrapped body, opens the configured
-editor, rechecks the exact staged state, and never creates a commit. A `forbid`
-policy rejects composition. See [COMPOSE.md](COMPOSE.md).
+user may instead invoke `zsh-git-inlay compose` for an already prepared
+candidate whose subject passed composition grounding eligibility: it proposes a
+policy-wrapped body, opens the configured editor, rechecks the exact staged
+state, and never creates a commit. A `forbid` policy rejects composition. See
+[COMPOSE.md](COMPOSE.md).
 
 Effective precedence is fixed:
 

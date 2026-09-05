@@ -376,3 +376,25 @@ must remain off the lookup path.
   this checkout, and macOS runtime validation remains external. The repository
   has no license file, so artifact redistribution and publication remain
   explicitly blocked pending maintainer choice rather than being inferred.
+- 2026-09-05: completed Milestone 14's final local reliability and evidence
+  pass. `make test` now includes a bounded soak that starts three separate Zsh
+  workers against two staged repositories while one index changes thirty
+  times; both final exact states must receive fresh candidates. The new
+  reliability guide maps this and existing unit/integration evidence to
+  linked-worktree isolation, daemon restart, malformed IPC/cache, provider
+  cancellation/failure, configuration and permission revocation, activity TTL,
+  prefix/cycling, hostile/large staged inputs, Neovim failure, and lifecycle
+  coverage. The previously missing configuration and privacy guides now state
+  the strict data-only configuration boundary, local retention, no-telemetry
+  policy, optional capability grants, and remaining trust assumptions. `make
+  test`, `go test -race ./...`, `make lint`, and a fresh four-platform
+  `make release-snapshot VERSION=verification-0.1.0 DIST=.build/release-m14`
+  passed. The final benchmark was parser 0.221 µs/op, exact snapshot 6.09
+  ms/op, deterministic generation 1.11 ms/op, and warm socket lookup 0.067
+  ms/op, within 1 ms/25 ms/0.25 ms budgets and consistent with M12's final
+  run. `doctor --json` found no daemon, reachable Ollama, or managed model;
+  no model download, cloud request, credential, upload, push, package, or
+  release was used. Remaining external validation needs are live local-model
+  quality, live OpenAI compatibility/billing/quality with explicit consent,
+  macOS runtime/CI execution, a maintainer-selected license before artifact
+  redistribution, and independent security/usability evaluation.
