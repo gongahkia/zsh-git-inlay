@@ -33,6 +33,7 @@ type Settings struct {
 	ProviderModel     string
 	ProviderTimeout   time.Duration
 	ProviderFallback  string
+	GroundingPolicy   string
 	CycleKeybinding   string
 	Verbose           bool
 	Version           string
@@ -49,6 +50,7 @@ func Default() Settings {
 		Provider:          "deterministic",
 		ProviderTimeout:   8 * time.Second,
 		ProviderFallback:  "deterministic",
+		GroundingPolicy:   "conservative",
 		CycleKeybinding:   "^Xg",
 		Version:           "default",
 	}
@@ -95,6 +97,7 @@ func Load() (Settings, error) {
 		"provider.model":                    true,
 		"provider.timeout":                  true,
 		"provider.fallback":                 true,
+		"grounding.ambiguity":               true,
 		"zsh.cycle_keybinding":              true,
 		"diagnostics.verbose":               true,
 	})
@@ -182,6 +185,15 @@ func Load() (Settings, error) {
 	}
 	if settings.Provider == "ollama" && settings.ProviderModel == "" {
 		return Settings{}, fmt.Errorf("invalid config %s: provider.model is required for ollama", path)
+	}
+	if value, ok := values["grounding.ambiguity"]; ok {
+		if !quoted(value) {
+			return Settings{}, fmt.Errorf("invalid config %s: grounding.ambiguity must be a string", path)
+		}
+		settings.GroundingPolicy = unquote(value)
+		if settings.GroundingPolicy != "conservative" && settings.GroundingPolicy != "quiet" && settings.GroundingPolicy != "visible" && settings.GroundingPolicy != "hintable" {
+			return Settings{}, fmt.Errorf("invalid config %s: grounding.ambiguity must be conservative, quiet, visible, or hintable", path)
+		}
 	}
 	if value, ok := values["zsh.cycle_keybinding"]; ok {
 		if !quoted(value) {

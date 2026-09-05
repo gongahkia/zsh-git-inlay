@@ -18,6 +18,7 @@ import (
 	"github.com/gongahkia/zsh-git-inlay/internal/candidate"
 	"github.com/gongahkia/zsh-git-inlay/internal/config"
 	"github.com/gongahkia/zsh-git-inlay/internal/gitstate"
+	"github.com/gongahkia/zsh-git-inlay/internal/grounding"
 	"github.com/gongahkia/zsh-git-inlay/internal/ipc"
 	"github.com/gongahkia/zsh-git-inlay/internal/provider"
 	"github.com/gongahkia/zsh-git-inlay/internal/repoctx"
@@ -32,6 +33,7 @@ type Record struct {
 	Candidates         []candidate.Candidate `json:"candidates"`
 	CreatedAt          time.Time             `json:"created_at"`
 	Provider           provider.Metadata     `json:"provider"`
+	Grounding          []grounding.Result    `json:"grounding,omitempty"`
 }
 
 type Status struct {
@@ -75,6 +77,7 @@ type Server struct {
 	provider        provider.Provider
 	fallback        provider.Provider
 	providerVersion string
+	ambiguityPolicy string
 	stop            chan struct{}
 	stopped         sync.Once
 }
@@ -95,7 +98,7 @@ func New(settings config.Settings, socket, cacheDir string) *Server {
 	if err != nil {
 		selected = provider.Deterministic{}
 	}
-	return &Server{settings: settings, socket: socket, cacheDir: cacheDir, cache: map[string]Record{}, active: map[string]active{}, jobs: map[string]job{}, sem: make(chan struct{}, settings.MaxGenerationJobs), lastUse: time.Now(), cacheStatus: CacheStatus{MaxEntries: settings.CacheMaxRecords, MaxBytes: settings.CacheMaxBytes}, provider: selected, fallback: provider.Fallback(settings), providerVersion: settings.Version, stop: make(chan struct{})}
+	return &Server{settings: settings, socket: socket, cacheDir: cacheDir, cache: map[string]Record{}, active: map[string]active{}, jobs: map[string]job{}, sem: make(chan struct{}, settings.MaxGenerationJobs), lastUse: time.Now(), cacheStatus: CacheStatus{MaxEntries: settings.CacheMaxRecords, MaxBytes: settings.CacheMaxBytes}, provider: selected, fallback: provider.Fallback(settings), providerVersion: settings.Version, ambiguityPolicy: settings.GroundingPolicy, stop: make(chan struct{})}
 }
 
 func Serve(ctx context.Context, settings config.Settings, initialCWD string) error {
@@ -264,8 +267,19 @@ func (server *Server) generate(ctx context.Context, expected gitstate.State, cwd
 	}
 	generated, err := server.generateCandidates(ctx, cwd, compiled)
 	if err == nil && ctx.Err() == nil {
-		candidates, convertErr := generated.ToCandidates()
-		if convertErr != nil {
+		policy := server.policy()
+		candidates, reports, rankErr := rankCandidates(generated, compiled, policy)
+		if rankErr != nil {
+			server.finish(expected.Fingerprint, jobID)
+			return
+		}
+		if len(candidates) == 0 && (policy == "conservative" || policy == "hintable") {
+			if fallback, fallbackErr := server.generateFallback(ctx, cwd, compiled, generated.Metadata.Name); fallbackErr == nil {
+				generated = fallback
+				candidates, reports, rankErr = rankCandidates(generated, compiled, policy)
+			}
+		}
+		if rankErr != nil || len(candidates) == 0 {
 			server.finish(expected.Fingerprint, jobID)
 			return
 		}
@@ -273,7 +287,7 @@ func (server *Server) generate(ctx context.Context, expected gitstate.State, cwd
 		current, checkErr := gitstate.Snapshot(checkContext, cwd)
 		cancel()
 		if checkErr == nil && current.Availability == gitstate.Ready && current.Fingerprint == expected.Fingerprint {
-			record := Record{Fingerprint: expected.Fingerprint, Repository: expected.RepoID, Worktree: expected.WorktreeID, ContextFingerprint: expected.ContextFingerprint, Candidates: candidates, CreatedAt: time.Now().UTC(), Provider: generated.Metadata}
+			record := Record{Fingerprint: expected.Fingerprint, Repository: expected.RepoID, Worktree: expected.WorktreeID, ContextFingerprint: expected.ContextFingerprint, Candidates: candidates, CreatedAt: time.Now().UTC(), Provider: generated.Metadata, Grounding: reports}
 			if server.store(record) == nil {
 				finalContext, finalCancel := gitstate.WithTimeout()
 				final, finalErr := gitstate.Snapshot(finalContext, cwd)
@@ -287,6 +301,24 @@ func (server *Server) generate(ctx context.Context, expected gitstate.State, cwd
 		}
 	}
 	server.finish(expected.Fingerprint, jobID)
+}
+
+func rankCandidates(response provider.Response, compiled repoctx.Compiled, policy string) ([]candidate.Candidate, []grounding.Result, error) {
+	values, err := response.ToCandidates()
+	if err != nil {
+		return nil, nil, err
+	}
+	reports := grounding.Evaluate(response.Candidates, compiled)
+	order := grounding.Rank(reports, policy)
+	rankedValues := make([]candidate.Candidate, 0, len(order))
+	rankedReports := make([]grounding.Result, 0, len(order))
+	for rank, index := range order {
+		value := values[index]
+		value.Rank = rank
+		rankedValues = append(rankedValues, value)
+		rankedReports = append(rankedReports, reports[index])
+	}
+	return rankedValues, rankedReports, nil
 }
 
 func (server *Server) compileContext(ctx context.Context, cwd string, state gitstate.State) (repoctx.Compiled, error) {
@@ -308,6 +340,22 @@ func (server *Server) generateCandidates(ctx context.Context, cwd string, compil
 	return fallback.Generate(ctx, request)
 }
 
+func (server *Server) generateFallback(ctx context.Context, cwd string, compiled repoctx.Compiled, selectedName string) (provider.Response, error) {
+	server.providerMu.RLock()
+	fallback := server.fallback
+	server.providerMu.RUnlock()
+	if fallback == nil || fallback.Metadata().Name == selectedName {
+		return provider.Response{}, fmt.Errorf("no distinct deterministic fallback is configured")
+	}
+	return fallback.Generate(ctx, provider.Request{CWD: cwd, Context: compiled.Prompt(), ContextFingerprint: compiled.ContextFingerprint})
+}
+
+func (server *Server) policy() string {
+	server.providerMu.RLock()
+	defer server.providerMu.RUnlock()
+	return server.ambiguityPolicy
+}
+
 func (server *Server) refreshProvider() error {
 	settings, err := config.Load()
 	if err != nil {
@@ -325,7 +373,7 @@ func (server *Server) refreshProvider() error {
 	}
 	server.providerMu.Lock()
 	if settings.Version != server.providerVersion {
-		server.provider, server.fallback, server.providerVersion = selected, provider.Fallback(settings), settings.Version
+		server.provider, server.fallback, server.providerVersion, server.ambiguityPolicy = selected, provider.Fallback(settings), settings.Version, settings.GroundingPolicy
 	}
 	server.providerMu.Unlock()
 	return nil
@@ -622,11 +670,16 @@ func (server *Server) expired(record Record) bool {
 }
 
 func validRecord(record Record, fingerprint string) bool {
-	if record.Fingerprint != fingerprint || record.Repository == "" || record.Worktree == "" || len(record.ContextFingerprint) != 64 || record.CreatedAt.IsZero() || !record.Provider.Valid() || len(record.Candidates) == 0 || len(record.Candidates) > candidate.MaxCandidates {
+	if record.Fingerprint != fingerprint || record.Repository == "" || record.Worktree == "" || len(record.ContextFingerprint) != 64 || record.CreatedAt.IsZero() || !record.Provider.Valid() || len(record.Candidates) == 0 || len(record.Candidates) > candidate.MaxCandidates || len(record.Grounding) != len(record.Candidates) {
 		return false
 	}
 	for index, value := range record.Candidates {
 		if value.Rank != index || !candidate.Valid(value) {
+			return false
+		}
+		switch record.Grounding[index].State {
+		case grounding.Grounded, grounding.PartiallyGrounded, grounding.Ungrounded, grounding.InsufficientContext:
+		default:
 			return false
 		}
 	}

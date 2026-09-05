@@ -58,6 +58,9 @@ name = "deterministic"
 timeout = "8s"
 fallback = "deterministic" # or "none"
 
+[grounding]
+ambiguity = "conservative" # conservative, quiet, visible, or hintable
+
 [zsh]
 cycle_keybinding = "^Xg"
 
@@ -95,7 +98,7 @@ The runtime socket defaults to `$XDG_RUNTIME_DIR/zsh-git-inlay/daemon.sock`; whe
 
 ## Diagnostics and development
 
-`fingerprint`, `context`, `status`, `candidates`, and `daemon stop` are administrative commands, not alternate commit-message workflows:
+`fingerprint`, `context`, `status`, `candidates`, `explain`, and `daemon stop` are administrative commands, not alternate commit-message workflows:
 
 ```zsh
 zsh-git-inlay fingerprint --cwd .
@@ -103,11 +106,17 @@ zsh-git-inlay context --cwd . --json
 zsh-git-inlay context --cwd . --provider ollama
 zsh-git-inlay status --json
 zsh-git-inlay candidates --cwd .
+zsh-git-inlay explain --cwd . --json
 zsh-git-inlay suggest --cwd . --buffer 'git commit -m ' --json
 zsh-git-inlay daemon stop
 ```
 
 The JSON suggestion diagnostic distinguishes unsupported syntax, outside/no-staged/conflicted repositories, daemon startup/unavailability, pending/ready/stale cache results, malformed replies, and a user prefix that matches no candidate. The interactive strategy intentionally stays silent for those states.
+
+Candidates are grounded and ranked in the daemon before publication. Provider
+evidence references are checked against staged context; deterministic checks
+are separated from heuristic fix/behavior signals. See [the grounding
+guide](docs/GROUNDING.md) for policy behavior and `explain` output.
 
 Build, test, lint, and benchmark the prototype with:
 

@@ -19,6 +19,7 @@ import (
 	"github.com/gongahkia/zsh-git-inlay/internal/daemon"
 	"github.com/gongahkia/zsh-git-inlay/internal/evaluation"
 	"github.com/gongahkia/zsh-git-inlay/internal/gitstate"
+	"github.com/gongahkia/zsh-git-inlay/internal/grounding"
 	"github.com/gongahkia/zsh-git-inlay/internal/ipc"
 	"github.com/gongahkia/zsh-git-inlay/internal/managed"
 	"github.com/gongahkia/zsh-git-inlay/internal/provider"
@@ -52,6 +53,8 @@ func run(arguments []string) error {
 		return suggest(arguments[1:])
 	case "candidates":
 		return candidates(arguments[1:])
+	case "explain":
+		return explain(arguments[1:])
 	case "status":
 		return status(arguments[1:])
 	case "evaluate":
@@ -66,7 +69,7 @@ func run(arguments []string) error {
 }
 
 func usage() error {
-	return errors.New("usage: zsh-git-inlay {doctor|config|status|fingerprint|context|observe|suggest|candidates|evaluate|model|daemon serve|daemon stop}")
+	return errors.New("usage: zsh-git-inlay {doctor|config|status|fingerprint|context|observe|suggest|candidates|explain|evaluate|model|daemon serve|daemon stop}")
 }
 
 func commonFlags(name string) (*flag.FlagSet, *string, *bool) {
@@ -278,6 +281,66 @@ func candidates(arguments []string) error {
 	}
 	for _, candidate := range record.Candidates {
 		fmt.Println(candidate.Message)
+	}
+	return nil
+}
+
+func explain(arguments []string) error {
+	flags, cwdFlag, jsonOutput := commonFlags("explain")
+	if err := flags.Parse(arguments); err != nil {
+		return err
+	}
+	cwd, err := resolveCWD(*cwdFlag)
+	if err != nil {
+		return err
+	}
+	snapshotContext, cancel := gitstate.WithTimeout()
+	defer cancel()
+	state, err := gitstate.Snapshot(snapshotContext, cwd)
+	if err != nil {
+		return err
+	}
+	if state.Availability != gitstate.Ready {
+		return fmt.Errorf("%s: %s", state.Availability, state.Reason)
+	}
+	reply, err := call(ipc.Request{Version: ipc.Version, Operation: "lookup", Fingerprint: state.Fingerprint, Repository: state.RepoID, Worktree: state.WorktreeID}, 100*time.Millisecond)
+	if err != nil {
+		return fmt.Errorf("daemon unavailable: %w", err)
+	}
+	if reply.Status != "ready" {
+		return fmt.Errorf("explain %s", reply.Status)
+	}
+	var record daemon.Record
+	if err := json.Unmarshal(reply.Payload, &record); err != nil {
+		return fmt.Errorf("decode explanation: %w", err)
+	}
+	if len(record.Grounding) != len(record.Candidates) {
+		return errors.New("grounding diagnostics are unavailable for this candidate record")
+	}
+	type explanation struct {
+		Message   string           `json:"message"`
+		Grounding grounding.Result `json:"grounding"`
+	}
+	values := make([]explanation, len(record.Candidates))
+	for index, candidate := range record.Candidates {
+		values[index] = explanation{Message: candidate.Message, Grounding: record.Grounding[index]}
+	}
+	if *jsonOutput {
+		return printJSON(map[string]any{"fingerprint": record.Fingerprint, "provider": record.Provider, "candidates": values})
+	}
+	for _, value := range values {
+		fmt.Printf("%s\n  %s score=%d\n", value.Message, value.Grounding.State, value.Grounding.Score)
+		for _, check := range value.Grounding.Checks {
+			outcome := "failed"
+			if check.Passed {
+				outcome = "passed"
+			}
+			kind := "heuristic"
+			if check.Deterministic {
+				kind = "deterministic"
+			}
+			fmt.Printf("  %s %s: %s\n", kind, check.Name, outcome)
+		}
 	}
 	return nil
 }

@@ -89,10 +89,27 @@ type Compiled struct {
 	TotalBytes         int      `json:"total_bytes"`
 	Sources            []Source `json:"sources"`
 
-	prompt string
+	prompt   string
+	evidence []Evidence
+	issues   []string
+	types    []string
 }
 
 func (compiled Compiled) Prompt() string { return compiled.prompt }
+
+// Evidence is private to deterministic grounding. It is deliberately omitted
+// from the administrative context preview because paths may be sensitive.
+type Evidence struct {
+	ID     string
+	Path   string
+	Status string
+}
+
+func (compiled Compiled) Evidence() []Evidence { return append([]Evidence(nil), compiled.evidence...) }
+
+func (compiled Compiled) Issues() []string { return append([]string(nil), compiled.issues...) }
+
+func (compiled Compiled) RecentTypes() []string { return append([]string(nil), compiled.types...) }
 
 type changedPath struct {
 	Status string
@@ -184,11 +201,44 @@ func Compile(ctx context.Context, cwd string, state gitstate.State, provider str
 		Budget:             budget,
 		TotalBytes:         compiler.total,
 		Sources:            compiler.sources,
+		evidence:           pathEvidence(paths),
+	}
+	if issue != "" {
+		compiled.issues = []string{issue}
+	}
+	if subjectsErr == nil {
+		compiled.types = recentTypes(string(subjects))
 	}
 	compiled.prompt = buildPrompt(compiled)
 	contentHash := sha256.Sum256([]byte(compiled.prompt))
 	compiled.ContentFingerprint = hex.EncodeToString(contentHash[:])
 	return compiled, nil
+}
+
+func pathEvidence(paths []changedPath) []Evidence {
+	result := make([]Evidence, 0, len(paths))
+	for index, value := range paths {
+		result = append(result, Evidence{ID: fmt.Sprintf("change:%d", index), Path: value.Path, Status: value.Status})
+	}
+	return result
+}
+
+func recentTypes(subjects string) []string {
+	result := make([]string, 0, 12)
+	for _, subject := range strings.Split(subjects, "\n") {
+		prefix, _, found := strings.Cut(subject, ":")
+		if !found {
+			continue
+		}
+		if open := strings.IndexByte(prefix, '('); open >= 0 {
+			prefix = prefix[:open]
+		}
+		prefix = strings.TrimSpace(strings.ToLower(prefix))
+		if prefix != "" {
+			result = append(result, prefix)
+		}
+	}
+	return result
 }
 
 type collector struct {

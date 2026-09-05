@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"os"
@@ -8,6 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/gongahkia/zsh-git-inlay/internal/config"
+	"github.com/gongahkia/zsh-git-inlay/internal/daemon"
 )
 
 func TestContextCommandReportsSummaryWithoutSourceContent(t *testing.T) {
@@ -36,6 +41,50 @@ func TestContextCommandReportsSummaryWithoutSourceContent(t *testing.T) {
 	if summary["provider"] != "ollama" || summary["staged_only"] != true || summary["context_fingerprint"] == "" || summary["sources"] == nil {
 		t.Fatalf("unexpected context summary: %#v", summary)
 	}
+}
+
+func TestExplainCommandReportsGroundingForPreparedCandidate(t *testing.T) {
+	repository := t.TempDir()
+	runtimeDirectory, cacheDirectory := filepath.Join(t.TempDir(), "runtime"), filepath.Join(t.TempDir(), "cache")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("ZSH_GIT_INLAY_RUNTIME_DIR", runtimeDirectory)
+	t.Setenv("ZSH_GIT_INLAY_CACHE_DIR", cacheDirectory)
+	commandGit(t, repository, "init", "-q", "-b", "main")
+	if err := os.WriteFile(filepath.Join(repository, "parser_test.go"), []byte("package parser\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	commandGit(t, repository, "add", "parser_test.go")
+	serverContext, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- daemon.Serve(serverContext, config.Default(), repository) }()
+	defer func() {
+		cancel()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Error(err)
+			}
+		case <-time.After(time.Second):
+			t.Error("daemon did not stop")
+		}
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		output, err := captureCommandOutput(func() error {
+			return run([]string{"explain", "--cwd", repository, "--json"})
+		})
+		if err == nil {
+			var report map[string]any
+			if json.Unmarshal([]byte(output), &report) == nil {
+				if candidates, ok := report["candidates"].([]any); ok && len(candidates) > 0 {
+					return
+				}
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("explain did not return grounding diagnostics for a prepared candidate")
 }
 
 func captureCommandOutput(run func() error) (string, error) {

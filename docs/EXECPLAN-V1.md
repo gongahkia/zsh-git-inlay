@@ -179,3 +179,17 @@ must remain off the lookup path.
   retained as evidence rather than attributed to the compiler. `doctor --json`
   still found no running daemon or reachable Ollama and made no model request
   or download.
+- 2026-09-05: completed Milestone 5's pre-publication grounding and ranking.
+  Deterministic checks validate structured evidence IDs, conventional type and
+  subject shape, context-derived scope, bounded branch issue references, and
+  staged test-path evidence. Component/style matching and fix/behavior claims
+  are explicitly heuristic; unsupported references and claims are rejected or
+  demoted rather than treated as semantic proof. Candidate records retain
+  grounding diagnostics, and `explain --json` is covered against a private test
+  daemon. A validated user-global ambiguity policy supports conservative,
+  quiet, visible, and hintable selection without a competing Zsh renderer.
+  Focused race tests plus `go test ./...`, `make test`, and `make lint` passed.
+  The benchmark recorded parser 0.228 µs/op, exact snapshot 6.69 ms/op,
+  deterministic generation 1.19 ms/op, and warm socket lookup 0.073 ms/op,
+  all within the existing absolute budgets. Doctor again found no daemon or
+  reachable Ollama; no live model request or download occurred.

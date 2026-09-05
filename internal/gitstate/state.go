@@ -22,7 +22,8 @@ const (
 	// changes. Snapshot includes it without asking the ZLE lookup path to build
 	// repository context.
 	ContextVersion   = "v1"
-	GeneratorVersion = "v1-provider-" + config.ProviderPromptVersion + "-context-" + ContextVersion
+	GroundingVersion = "v1"
+	GeneratorVersion = "v1-provider-" + config.ProviderPromptVersion + "-context-" + ContextVersion + "-grounding-" + GroundingVersion
 )
 
 const maxIndexBytes = 64 * 1024 * 1024

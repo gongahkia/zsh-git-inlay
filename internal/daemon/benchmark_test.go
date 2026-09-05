@@ -13,6 +13,7 @@ import (
 	"github.com/gongahkia/zsh-git-inlay/internal/candidate"
 	"github.com/gongahkia/zsh-git-inlay/internal/config"
 	"github.com/gongahkia/zsh-git-inlay/internal/gitstate"
+	"github.com/gongahkia/zsh-git-inlay/internal/grounding"
 	"github.com/gongahkia/zsh-git-inlay/internal/ipc"
 	"github.com/gongahkia/zsh-git-inlay/internal/provider"
 )
@@ -47,7 +48,7 @@ func BenchmarkWarmLookupRoundTrip(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	record := Record{Fingerprint: state.Fingerprint, Repository: state.RepoID, Worktree: state.WorktreeID, ContextFingerprint: state.ContextFingerprint, Candidates: candidates, CreatedAt: time.Now().UTC(), Provider: provider.Deterministic{}.Metadata()}
+	record := Record{Fingerprint: state.Fingerprint, Repository: state.RepoID, Worktree: state.WorktreeID, ContextFingerprint: state.ContextFingerprint, Candidates: candidates, CreatedAt: time.Now().UTC(), Provider: provider.Deterministic{}.Metadata(), Grounding: groundedForBenchmark(candidates)}
 	if err := server.store(record); err != nil {
 		b.Fatal(err)
 	}
@@ -76,12 +77,20 @@ func candidateForBenchmark(repository string) ([]candidate.Candidate, error) {
 }
 
 func BenchmarkCacheRecordEncoding(b *testing.B) {
-	record := Record{Fingerprint: "fingerprint", Repository: "repository", Worktree: "worktree", ContextFingerprint: "context", Candidates: []candidate.Candidate{{Message: "chore(repo): prepare staged update", Rank: 0}}, CreatedAt: time.Unix(0, 0).UTC(), Provider: provider.Deterministic{}.Metadata()}
+	record := Record{Fingerprint: "fingerprint", Repository: "repository", Worktree: "worktree", ContextFingerprint: "context", Candidates: []candidate.Candidate{{Message: "chore(repo): prepare staged update", Rank: 0}}, CreatedAt: time.Unix(0, 0).UTC(), Provider: provider.Deterministic{}.Metadata(), Grounding: []grounding.Result{{State: grounding.Grounded}}}
 	for index := 0; index < b.N; index++ {
 		if _, err := json.Marshal(record); err != nil {
 			b.Fatal(err)
 		}
 	}
+}
+
+func groundedForBenchmark(candidates []candidate.Candidate) []grounding.Result {
+	result := make([]grounding.Result, len(candidates))
+	for index := range result {
+		result[index].State = grounding.Grounded
+	}
+	return result
 }
 
 func benchmarkDaemonGit(b *testing.B, cwd string, arguments ...string) {

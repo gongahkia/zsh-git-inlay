@@ -59,6 +59,16 @@ existing shell-safe candidate form, and applies the same pre/post-publication
 fingerprint checks. The strategy and lookup paths do not compile context,
 invoke a provider, or wait for inference.
 
+After a provider response passes its structural schema, grounding code checks
+its evidence references against the compiled staged context and ranks valid
+messages before publication. It records grounding states and individual
+deterministic versus heuristic checks alongside the cache record for `explain`.
+Unsupported evidence, issue, test, fix, or behavioral claims are rejected or
+demoted according to the user-global ambiguity policy. Recent subject type is
+an additional style ranking signal; future learned preferences are not yet an
+input. This work occurs before publication; it adds no operation to the
+strategy or warm lookup path.
+
 ## Prototype provider and parser
 
 The deterministic provider invokes `git diff --cached --name-status -z

@@ -16,8 +16,10 @@ import (
 	"github.com/gongahkia/zsh-git-inlay/internal/candidate"
 	"github.com/gongahkia/zsh-git-inlay/internal/config"
 	"github.com/gongahkia/zsh-git-inlay/internal/gitstate"
+	"github.com/gongahkia/zsh-git-inlay/internal/grounding"
 	"github.com/gongahkia/zsh-git-inlay/internal/ipc"
 	"github.com/gongahkia/zsh-git-inlay/internal/provider"
+	"github.com/gongahkia/zsh-git-inlay/internal/repoctx"
 )
 
 func TestObservePublishesAtomicScopedCandidates(t *testing.T) {
@@ -104,6 +106,29 @@ func TestGenerationReceivesBoundedContextAndRecordsItsIdentity(t *testing.T) {
 	if !found || record.ContextFingerprint != state.ContextFingerprint {
 		t.Fatalf("cached context identity = %#v found=%t", record, found)
 	}
+	if len(record.Grounding) != len(record.Candidates) || record.Grounding[0].State != grounding.Grounded {
+		t.Fatalf("cached grounding = %#v", record.Grounding)
+	}
+}
+
+func TestRankingDemotesUnsupportedProviderClaims(t *testing.T) {
+	repository := daemonRepository(t, "parser_test.go")
+	state := daemonSnapshot(t, repository)
+	compiled, err := repoctx.Compile(context.Background(), repository, state, "deterministic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := provider.Response{Metadata: provider.Deterministic{}.Metadata(), Candidates: []provider.Candidate{
+		{Type: "fix", Scope: "payment", Subject: "prevent payment timeout xyz-999", EvidenceIDs: []string{"change:99"}},
+		{Type: "test", Scope: "repo", Subject: "cover staged parser tests", EvidenceIDs: []string{"change:0"}},
+	}}
+	values, reports, err := rankCandidates(response, compiled, "conservative")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(values) != 1 || values[0].Message != "test(repo): cover staged parser tests" || len(reports) != 1 || reports[0].State != grounding.Grounded {
+		t.Fatalf("ranked values=%#v reports=%#v", values, reports)
+	}
 }
 
 func TestObserveRefreshesChangedProviderConfiguration(t *testing.T) {
@@ -114,7 +139,7 @@ func TestObserveRefreshesChangedProviderConfiguration(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("XDG_CONFIG_HOME", configRoot)
-	if err := os.WriteFile(path, []byte("[provider]\nname = \"ollama\"\nmodel = \"qwen2.5-coder:0.5b\"\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("[provider]\nname = \"ollama\"\nmodel = \"qwen2.5-coder:0.5b\"\n[grounding]\nambiguity = \"quiet\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := server.refreshProvider(); err != nil {
@@ -125,6 +150,9 @@ func TestObserveRefreshesChangedProviderConfiguration(t *testing.T) {
 	server.providerMu.RUnlock()
 	if metadata.Name != "ollama" || metadata.Model != "qwen2.5-coder:0.5b" {
 		t.Fatalf("provider refresh = %#v", metadata)
+	}
+	if policy := server.policy(); policy != "quiet" {
+		t.Fatalf("grounding policy refresh = %q", policy)
 	}
 }
 
@@ -413,6 +441,10 @@ func cacheRecordFingerprint(fingerprint string, created time.Time) Record {
 		ContextFingerprint: strings.Repeat("c", 64),
 		CreatedAt:          created,
 		Provider:           provider.Deterministic{}.Metadata(),
+		Grounding: []grounding.Result{
+			{State: grounding.Grounded},
+			{State: grounding.Grounded},
+		},
 		Candidates: []candidate.Candidate{
 			{Message: "chore(repo): update staged files", Rank: 0},
 			{Message: "chore(repo): refine staged changes", Rank: 1},
