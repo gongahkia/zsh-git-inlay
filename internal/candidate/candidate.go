@@ -113,7 +113,9 @@ func dominantModule(changes []change) string {
 		counts[normalise(part)]++
 	}
 	keys := make([]string, 0, len(counts))
-	for key := range counts { keys = append(keys, key) }
+	for key := range counts {
+		keys = append(keys, key)
+	}
 	sort.Strings(keys)
 	best := "repo"
 	for _, key := range keys {
@@ -126,32 +128,62 @@ func dominantModule(changes []change) string {
 
 func classify(changes []change) string {
 	all := func(match func(string) bool) bool {
-		for _, change := range changes { if !match(strings.ToLower(change.file)) { return false } }
+		for _, change := range changes {
+			if !match(strings.ToLower(change.file)) {
+				return false
+			}
+		}
 		return true
 	}
-	if all(func(file string) bool { return strings.HasSuffix(file, ".md") || strings.HasPrefix(file, "docs/") }) { return "docs" }
-	if all(func(file string) bool { return strings.Contains(file, "test") || strings.HasSuffix(file, "_test.go") }) { return "test" }
-	if all(func(file string) bool { base := path.Base(file); return base == "go.mod" || base == "go.sum" || base == "package.json" || base == "package-lock.json" || base == "cargo.toml" || base == "cargo.lock" }) { return "build" }
+	if all(func(file string) bool { return strings.HasSuffix(file, ".md") || strings.HasPrefix(file, "docs/") }) {
+		return "docs"
+	}
+	if all(func(file string) bool { return strings.Contains(file, "test") || strings.HasSuffix(file, "_test.go") }) {
+		return "test"
+	}
+	if all(func(file string) bool {
+		base := path.Base(file)
+		return base == "go.mod" || base == "go.sum" || base == "package.json" || base == "package-lock.json" || base == "cargo.toml" || base == "cargo.lock"
+	}) {
+		return "build"
+	}
 	return "chore"
 }
 
 func normalise(value string) string {
 	var builder strings.Builder
 	for _, character := range strings.ToLower(value) {
-		if unicode.IsLetter(character) || unicode.IsDigit(character) || character == '.' || character == '_' || character == '-' { builder.WriteRune(character) } else { builder.WriteByte('-') }
+		if unicode.IsLetter(character) || unicode.IsDigit(character) || character == '.' || character == '_' || character == '-' {
+			builder.WriteRune(character)
+		} else {
+			builder.WriteByte('-')
+		}
 	}
 	result := strings.Trim(builder.String(), "-.")
-	if result == "" { return "repo" }
-	if len(result) > 40 { return result[:40] }
+	if result == "" {
+		return "repo"
+	}
+	if len(result) > 40 {
+		return result[:40]
+	}
 	return result
 }
 
 func safe(value string) bool {
-	if value == "" || len(value) > MaxMessageLen { return false }
+	if value == "" || len(value) > MaxMessageLen {
+		return false
+	}
 	for _, character := range value {
-		if !(unicode.IsLower(character) || unicode.IsDigit(character) || strings.ContainsRune(" ():-_./", character)) { return false }
+		if !(unicode.IsLower(character) || unicode.IsDigit(character) || strings.ContainsRune(" ():-_./", character)) {
+			return false
+		}
 	}
 	return true
 }
 
-func plural(count int) string { if count == 1 { return "" }; return "s" }
+func plural(count int) string {
+	if count == 1 {
+		return ""
+	}
+	return "s"
+}

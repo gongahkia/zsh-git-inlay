@@ -63,11 +63,11 @@ func Load() (Settings, error) {
 		return Settings{}, fmt.Errorf("read config: %w", err)
 	}
 	section, values, err := parse(string(content), map[string]bool{
-		"daemon.idle_timeout":              true,
-		"daemon.max_active_repositories":  true,
+		"daemon.idle_timeout":               true,
+		"daemon.max_active_repositories":    true,
 		"daemon.max_generation_concurrency": true,
-		"zsh.cycle_keybinding":            true,
-		"diagnostics.verbose":             true,
+		"zsh.cycle_keybinding":              true,
+		"diagnostics.verbose":               true,
 	})
 	_ = section
 	if err != nil {

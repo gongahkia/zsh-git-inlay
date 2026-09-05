@@ -2,5 +2,5 @@
 
 package daemon
 
-func syscallUmask077() int { return 0 }
+func syscallUmask077() int   { return 0 }
 func syscallUmask(value int) {}
