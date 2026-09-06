@@ -85,6 +85,7 @@ type Server struct {
 	cache            map[string]Record
 	active           map[string]active
 	jobs             map[string]job
+	failures         map[string]string
 	nextJob          uint64
 	sem              chan struct{}
 	lastUse          time.Time
@@ -129,6 +130,62 @@ func New(settings config.Settings, socket, cacheDir string) *Server {
 	}))
 }
 
+// PrepareForEvaluation runs one staged state through the daemon's local
+// generation, grounding, ranking, cache publication, and exact lookup path.
+// It is administrative-only: cache records live in a caller-owned private
+// temporary directory and no socket is opened.
+func PrepareForEvaluation(ctx context.Context, settings config.Settings, cwd, cacheDir string) (Record, error) {
+	if ctx == nil {
+		return Record{}, errors.New("evaluation context is required")
+	}
+	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
+		return Record{}, fmt.Errorf("create evaluation cache: %w", err)
+	}
+	if err := os.Chmod(cacheDir, 0o700); err != nil {
+		return Record{}, fmt.Errorf("set evaluation cache permissions: %w", err)
+	}
+	server := New(settings, "", cacheDir)
+	reply := server.observeWithContext(ctx, cwd, false)
+	if reply.Status != "pending" && reply.Status != "ready" {
+		return Record{}, fmt.Errorf("evaluation observation %s: %s", reply.Status, reply.Error)
+	}
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		stateContext, cancel := gitstate.WithTimeout()
+		state, err := gitstate.Snapshot(stateContext, cwd)
+		cancel()
+		if err != nil {
+			return Record{}, fmt.Errorf("snapshot evaluation state: %w", err)
+		}
+		if state.Availability != gitstate.Ready {
+			return Record{}, fmt.Errorf("evaluation staged state is %s", state.Availability)
+		}
+		lookup := server.lookup(ipc.Request{Version: ipc.Version, Operation: "lookup", Fingerprint: state.Fingerprint, Repository: state.RepoID, Worktree: state.WorktreeID})
+		if lookup.Status == "ready" {
+			var record Record
+			if err := json.Unmarshal(lookup.Payload, &record); err != nil {
+				return Record{}, fmt.Errorf("decode evaluation record: %w", err)
+			}
+			return record, nil
+		}
+		if lookup.Status != "pending" {
+			return Record{}, fmt.Errorf("evaluation lookup %s: %s", lookup.Status, lookup.Error)
+		}
+		if !server.pending(state.Fingerprint) {
+			if failure := server.failure(state.Fingerprint); failure != "" {
+				return Record{}, fmt.Errorf("evaluation generation failed: %s", failure)
+			}
+			return Record{}, errors.New("evaluation generation completed without an eligible candidate")
+		}
+		select {
+		case <-ctx.Done():
+			return Record{}, ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
 func newServer(settings config.Settings, socket, cacheDir string, events *activity.Store) *Server {
 	return newServerWithLearning(settings, socket, cacheDir, events, nil)
 }
@@ -142,7 +199,7 @@ func newServerWithCloud(settings config.Settings, socket, cacheDir string, event
 	if err != nil {
 		selected = provider.Deterministic{}
 	}
-	return &Server{settings: settings, socket: socket, cacheDir: cacheDir, cache: map[string]Record{}, active: map[string]active{}, jobs: map[string]job{}, sem: make(chan struct{}, settings.MaxGenerationJobs), lastUse: time.Now(), cacheStatus: CacheStatus{MaxEntries: settings.CacheMaxRecords, MaxBytes: settings.CacheMaxBytes}, provider: selected, fallback: provider.Fallback(settings), providerVersion: settings.Version, ambiguityPolicy: settings.GroundingPolicy, activity: events, learner: learner, cloud: grants, learningProfiles: map[string]learning.Profile{}, prepared: map[string]preparedLearning{}, stop: make(chan struct{})}
+	return &Server{settings: settings, socket: socket, cacheDir: cacheDir, cache: map[string]Record{}, active: map[string]active{}, jobs: map[string]job{}, failures: map[string]string{}, sem: make(chan struct{}, settings.MaxGenerationJobs), lastUse: time.Now(), cacheStatus: CacheStatus{MaxEntries: settings.CacheMaxRecords, MaxBytes: settings.CacheMaxBytes}, provider: selected, fallback: provider.Fallback(settings), providerVersion: settings.Version, ambiguityPolicy: settings.GroundingPolicy, activity: events, learner: learner, cloud: grants, learningProfiles: map[string]learning.Profile{}, prepared: map[string]preparedLearning{}, stop: make(chan struct{})}
 }
 
 func activitySettings(settings config.Settings) activity.Settings {
@@ -284,11 +341,17 @@ func (server *Server) handle(connection net.Conn) {
 }
 
 func (server *Server) observe(cwd string) ipc.Reply {
+	return server.observeWithContext(context.Background(), cwd, true)
+}
+
+func (server *Server) observeWithContext(parent context.Context, cwd string, refreshProvider bool) ipc.Reply {
 	if cwd == "" || len(cwd) > 4096 {
 		return ipc.Reply{Version: ipc.Version, Status: "malformed", Error: "invalid working directory"}
 	}
-	if err := server.refreshProvider(); err != nil {
-		return server.noteObserve(ipc.Reply{Version: ipc.Version, Status: "error", Error: err.Error()})
+	if refreshProvider {
+		if err := server.refreshProvider(); err != nil {
+			return server.noteObserve(ipc.Reply{Version: ipc.Version, Status: "error", Error: err.Error()})
+		}
 	}
 	snapshotContext, cancel := gitstate.WithTimeout()
 	defer cancel()
@@ -329,7 +392,8 @@ func (server *Server) observe(cwd string) ipc.Reply {
 		server.mu.Unlock()
 		return ipc.Reply{Version: ipc.Version, Status: "pending"}
 	}
-	jobContext, cancelJob := context.WithCancel(context.Background())
+	delete(server.failures, state.Fingerprint)
+	jobContext, cancelJob := context.WithCancel(parent)
 	server.nextJob++
 	jobID := server.nextJob
 	server.jobs[state.Fingerprint] = job{cancel: cancelJob, id: jobID}
@@ -338,62 +402,90 @@ func (server *Server) observe(cwd string) ipc.Reply {
 	return ipc.Reply{Version: ipc.Version, Status: "pending"}
 }
 
+func (server *Server) pending(fingerprint string) bool {
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	_, found := server.jobs[fingerprint]
+	return found
+}
+
+func (server *Server) failure(fingerprint string) string {
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	return server.failures[fingerprint]
+}
+
 func (server *Server) generate(ctx context.Context, expected gitstate.State, cwd string, jobID uint64) {
+	failure := "generation canceled"
+	defer func() { server.finishWithError(expected.Fingerprint, jobID, failure) }()
 	select {
 	case server.sem <- struct{}{}:
 		defer func() { <-server.sem }()
 	case <-ctx.Done():
-		server.finish(expected.Fingerprint, jobID)
 		return
 	}
 	activityProvenance := server.activity.Provenance(expected.RepoID, expected.WorktreeID)
 	compiled, compileErr := server.compileContext(ctx, cwd, expected, activityProvenance.Signals)
 	if compileErr != nil {
-		server.finish(expected.Fingerprint, jobID)
+		failure = "compile context: " + compileErr.Error()
 		return
 	}
 	repositoryPolicy, policyErr := config.LoadRepositoryPolicy(expected.Root)
 	if policyErr != nil {
-		server.finish(expected.Fingerprint, jobID)
+		failure = "load repository policy: " + policyErr.Error()
 		return
 	}
 	generated, cloudProvenance, err := server.generateCandidates(ctx, cwd, expected, compiled)
-	if err == nil && ctx.Err() == nil {
-		policy := server.policy()
-		candidates, reports, rankErr := rankCandidates(generated, compiled, policy, repositoryPolicy)
-		if rankErr != nil {
-			server.finish(expected.Fingerprint, jobID)
-			return
-		}
-		if len(candidates) == 0 && (policy == "conservative" || policy == "hintable") {
-			if fallback, fallbackErr := server.generateFallback(ctx, cwd, compiled, generated.Metadata.Name); fallbackErr == nil {
-				generated = fallback
-				candidates, reports, rankErr = rankCandidates(generated, compiled, policy, repositoryPolicy)
-			}
-		}
-		if rankErr != nil || len(candidates) == 0 {
-			server.finish(expected.Fingerprint, jobID)
-			return
-		}
-		candidates, reports, learningExplanation := server.applyLearning(ctx, cwd, expected, candidates, reports)
-		checkContext, cancel := gitstate.WithTimeout()
-		current, checkErr := gitstate.Snapshot(checkContext, cwd)
-		cancel()
-		if checkErr == nil && current.Availability == gitstate.Ready && current.Fingerprint == expected.Fingerprint {
-			record := Record{Fingerprint: expected.Fingerprint, Repository: expected.RepoID, Worktree: expected.WorktreeID, ContextFingerprint: expected.ContextFingerprint, Candidates: candidates, CreatedAt: time.Now().UTC(), Provider: generated.Metadata, Policy: repositoryPolicy, Grounding: reports, Activity: activityProvenance, Learning: learningExplanation, Cloud: cloudProvenance}
-			if server.store(record) == nil {
-				finalContext, finalCancel := gitstate.WithTimeout()
-				final, finalErr := gitstate.Snapshot(finalContext, cwd)
-				finalCancel()
-				if finalErr != nil || final.Availability != gitstate.Ready || final.Fingerprint != expected.Fingerprint {
-					server.discardRecord(record.Fingerprint, true)
-				} else {
-					server.remember(record.Fingerprint)
-				}
-			}
+	if err != nil {
+		failure = "generate provider response: " + err.Error()
+		return
+	}
+	if ctx.Err() != nil {
+		return
+	}
+	policy := server.policy()
+	candidates, reports, rankErr := rankCandidates(generated, compiled, policy, repositoryPolicy)
+	if rankErr != nil {
+		failure = "rank candidates: " + rankErr.Error()
+		return
+	}
+	if len(candidates) == 0 && (policy == "conservative" || policy == "hintable") {
+		if fallback, fallbackErr := server.generateFallback(ctx, cwd, compiled, generated.Metadata.Name); fallbackErr == nil {
+			generated = fallback
+			candidates, reports, rankErr = rankCandidates(generated, compiled, policy, repositoryPolicy)
 		}
 	}
-	server.finish(expected.Fingerprint, jobID)
+	if rankErr != nil {
+		failure = "rank candidates: " + rankErr.Error()
+		return
+	}
+	if len(candidates) == 0 {
+		failure = "no eligible candidate after grounding"
+		return
+	}
+	candidates, reports, learningExplanation := server.applyLearning(ctx, cwd, expected, candidates, reports)
+	checkContext, cancel := gitstate.WithTimeout()
+	current, checkErr := gitstate.Snapshot(checkContext, cwd)
+	cancel()
+	if checkErr != nil || current.Availability != gitstate.Ready || current.Fingerprint != expected.Fingerprint {
+		failure = "staged state changed before publication"
+		return
+	}
+	record := Record{Fingerprint: expected.Fingerprint, Repository: expected.RepoID, Worktree: expected.WorktreeID, ContextFingerprint: expected.ContextFingerprint, Candidates: candidates, CreatedAt: time.Now().UTC(), Provider: generated.Metadata, Policy: repositoryPolicy, Grounding: reports, Activity: activityProvenance, Learning: learningExplanation, Cloud: cloudProvenance}
+	if err := server.store(record); err != nil {
+		failure = "store candidate record: " + err.Error()
+		return
+	}
+	finalContext, finalCancel := gitstate.WithTimeout()
+	final, finalErr := gitstate.Snapshot(finalContext, cwd)
+	finalCancel()
+	if finalErr != nil || final.Availability != gitstate.Ready || final.Fingerprint != expected.Fingerprint {
+		server.discardRecord(record.Fingerprint, true)
+		failure = "staged state changed before publication"
+		return
+	}
+	server.remember(record.Fingerprint)
+	failure = ""
 }
 
 func rankCandidates(response provider.Response, compiled repoctx.Compiled, policy string, repositoryPolicy config.RepositoryPolicy) ([]candidate.Candidate, []grounding.Result, error) {
@@ -585,9 +677,18 @@ func (server *Server) refreshProvider() error {
 }
 
 func (server *Server) finish(fingerprint string, jobID uint64) {
+	server.finishWithError(fingerprint, jobID, "")
+}
+
+func (server *Server) finishWithError(fingerprint string, jobID uint64, failure string) {
 	server.mu.Lock()
 	if current, found := server.jobs[fingerprint]; found && current.id == jobID {
 		delete(server.jobs, fingerprint)
+		if failure == "" {
+			delete(server.failures, fingerprint)
+		} else {
+			server.failures[fingerprint] = failure
+		}
 	}
 	server.mu.Unlock()
 }

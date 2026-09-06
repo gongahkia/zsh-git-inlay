@@ -23,17 +23,21 @@ func TestSyntheticCorpusEvaluatesDeterministically(t *testing.T) {
 	if len(corpus.Cases) != 15 {
 		t.Fatalf("fixture count = %d, want 15", len(corpus.Cases))
 	}
-	report, err := EvaluateCorpus(context.Background(), corpus, DeterministicGenerator{}, DefaultOptions())
+	generator, err := NewDeterministicDaemonGenerator()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.SchemaVersion != SchemaVersion || report.Source.Kind != "synthetic_fixture" || report.Summary.Cases != len(corpus.Cases) {
+	report, err := EvaluateCorpus(context.Background(), corpus, generator, DefaultOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.SchemaVersion != SchemaVersion || len(report.CorpusDigest) != 64 || report.Source.Kind != "synthetic_fixture" || report.Summary.Cases != len(corpus.Cases) {
 		t.Fatalf("report = %#v", report)
 	}
 	if report.Provider.Model == "" || report.Provider.Quantization == "" || report.Provider.Runtime == "" || report.Provider.PromptVersion == "" || report.Environment.GOARCH == "" || report.Environment.CPUs < 1 || report.Settings.Timeout == "" {
 		t.Fatalf("missing reproducibility metadata: %#v", report)
 	}
-	for _, check := range []Check{report.Summary.ValidOutput, report.Summary.Conventional, report.Summary.AllowedScope, report.Summary.SubjectLength, report.Summary.ChangedComponent, report.Summary.UnsupportedComponent, report.Summary.UnsupportedIssue, report.Summary.UnsupportedTestOutcome, report.Summary.UnsupportedBehavior, report.Summary.StructuralGrounding} {
+	for _, check := range []Check{report.Summary.ValidOutput, report.Summary.Conventional, report.Summary.AllowedScope, report.Summary.SubjectLength, report.Summary.ChangedComponent, report.Summary.UnsupportedComponent, report.Summary.UnsupportedIssue, report.Summary.UnsupportedTestOutcome, report.Summary.UnsupportedBehavior, report.Summary.StructuralGrounding, report.Summary.DaemonGrounding, report.Summary.Repeatability} {
 		if check.Checked == 0 || check.Passed != check.Checked {
 			t.Fatalf("automatic check = %#v", check)
 		}
@@ -49,7 +53,7 @@ func TestSyntheticCorpusEvaluatesDeterministically(t *testing.T) {
 	if err != nil || len(heldOut.Cases) != 7 {
 		t.Fatalf("held-out corpus=%#v err=%v", heldOut, err)
 	}
-	heldOutReport, err := EvaluateCorpus(context.Background(), heldOut, DeterministicGenerator{}, DefaultOptions())
+	heldOutReport, err := EvaluateCorpus(context.Background(), heldOut, generator, DefaultOptions())
 	if err != nil || heldOutReport.Source.Partition != HeldOutSet || heldOutReport.Summary.Cases != len(heldOut.Cases) {
 		t.Fatalf("held-out report=%#v err=%v", heldOutReport, err)
 	}
@@ -80,7 +84,11 @@ func TestReplayHistoryReconstructsParentToCommitIndex(t *testing.T) {
 	evaluationGit(t, repository, "add", "docs/health.md")
 	evaluationGit(t, repository, "commit", "-qm", "docs: explain health endpoint")
 
-	report, err := ReplayHistory(context.Background(), repository, DeterministicGenerator{}, Options{Limit: 2})
+	generator, err := NewDeterministicDaemonGenerator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := ReplayHistory(context.Background(), repository, generator, Options{Limit: 2})
 	if err != nil {
 		t.Fatal(err)
 	}

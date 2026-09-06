@@ -74,6 +74,22 @@ func TestSupersededStateCannotPublish(t *testing.T) {
 	}
 }
 
+func TestPrepareForEvaluationUsesDaemonPublicationAndLookup(t *testing.T) {
+	repository := daemonRepository(t, "validation.go")
+	daemonGit(t, repository, "commit", "-qm", "synthetic baseline")
+	if err := os.WriteFile(filepath.Join(repository, "validation.go"), []byte("updated\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	daemonGit(t, repository, "add", "validation.go")
+	record, err := PrepareForEvaluation(context.Background(), config.Default(), repository, filepath.Join(t.TempDir(), "cache"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(record.Candidates) == 0 || len(record.Grounding) != len(record.Candidates) || record.Provider.Name != "deterministic" {
+		t.Fatalf("evaluation record = %#v", record)
+	}
+}
+
 func TestLearningObservesOnlyACompletedCommit(t *testing.T) {
 	server, _ := testServer(t)
 	store, err := learning.New(t.TempDir())

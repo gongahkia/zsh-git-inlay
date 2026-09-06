@@ -41,7 +41,7 @@ func Markdown(report Report) string {
 	var builder strings.Builder
 	fmt.Fprintf(&builder, "# zsh-git-inlay evaluation report\n\n")
 	fmt.Fprintf(&builder, "Generated: %s  \n", report.GeneratedAt.Format(time.RFC3339))
-	fmt.Fprintf(&builder, "Corpus: %s  \n", report.CorpusVersion)
+	fmt.Fprintf(&builder, "Corpus: %s (%s)  \n", report.CorpusVersion, report.CorpusDigest)
 	fmt.Fprintf(&builder, "Source: %s  \n", report.Source.Kind)
 	if report.Source.Partition != "" {
 		fmt.Fprintf(&builder, "Partition: %s  \n", report.Source.Partition)
@@ -63,10 +63,12 @@ func Markdown(report Report) string {
 		{"no unsupported test outcome", report.Summary.UnsupportedTestOutcome},
 		{"no unsupported behavioral claim", report.Summary.UnsupportedBehavior},
 		{"structural grounding coverage", report.Summary.StructuralGrounding},
+		{"daemon grounding coverage", report.Summary.DaemonGrounding},
+		{"repeated-generation match", report.Summary.Repeatability},
 	} {
 		fmt.Fprintf(&builder, "| %s | %d / %d | %.2f%% |\n", row.name, row.check.Passed, row.check.Checked, row.check.Rate*100)
 	}
-	fmt.Fprintf(&builder, "\nCold generation: %.3f ms average; warm generation: %.3f ms average; approximate process allocation: %d bytes.\n\n", report.Summary.ColdLatencyMilliseconds, report.Summary.WarmLatencyMilliseconds, report.Summary.ApproxAllocatedBytes)
+	fmt.Fprintf(&builder, "\nCold generation: %.3f ms average (p50 %.3f, p95 %.3f); warm generation: %.3f ms average (p50 %.3f, p95 %.3f); approximate process allocation: %d bytes.\n\n", report.Summary.ColdLatencyMilliseconds, report.Summary.ColdP50Milliseconds, report.Summary.ColdP95Milliseconds, report.Summary.WarmLatencyMilliseconds, report.Summary.WarmP50Milliseconds, report.Summary.WarmP95Milliseconds, report.Summary.ApproxAllocatedBytes)
 	builder.WriteString("## Per-case reference\n\n")
 	builder.WriteString("Historical subjects are references for human review, not a string-similarity target. Raw diffs are intentionally omitted.\n\n")
 	builder.WriteString("| Case | Reference subject | Candidates | Cold ms | Warm ms |\n| --- | --- | ---: | ---: | ---: |\n")
