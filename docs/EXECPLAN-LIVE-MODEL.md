@@ -115,7 +115,18 @@ the live runs and reported as approximate measurements.
    real-Zsh test scenarios. The corpus evaluator executes the daemon's actual
    context, provider, grounding, ranking, cache-publication, and exact-lookup
    code with a temporary private cache; it intentionally does not open a Unix
-   socket. The foreground daemon check supplies the service/socket evidence.
+   socket. The foreground daemon check supplies the service/socket evidence:
+
+   ```zsh
+   ZSH_GIT_INLAY_LIVE_OLLAMA_MODEL=<installed-exact-tag> make test-live-ollama
+   ```
+
+   This opt-in target checks the already-running loopback runtime's installed
+   model list, but never installs Ollama, pulls a model, or starts an Ollama
+   service. It creates only temporary product config, cache, data, socket, and
+   Git-fixture directories; it verifies the actual daemon/socket path,
+   Ollama metadata, grounded prepared lookup, exact staged-state replacement,
+   and recovery after a deliberately killed product daemon.
 5. Re-run the normal reliability, race, static, and benchmark gates. Preserve
    all failures in the aggregate report and retain deterministic as the default
    unless every gate above passes.

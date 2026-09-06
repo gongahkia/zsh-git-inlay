@@ -7,7 +7,7 @@ DIST ?= dist/release-snapshot
 LDFLAGS := -s -w -buildid= -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 BUILD_FLAGS := -trimpath -buildvcs=false -ldflags "$(LDFLAGS)"
 
-.PHONY: all build test test-go test-zsh test-eval test-reliability test-nvim test-install test-integration test-dogfood test-soak fuzz lint bench release-snapshot clean
+.PHONY: all build test test-go test-zsh test-eval test-reliability test-nvim test-install test-integration test-dogfood test-soak test-live-ollama fuzz lint bench release-snapshot clean
 
 all: build
 
@@ -48,6 +48,11 @@ test-dogfood: build
 test-soak: build
 	ZSH_GIT_INLAY_BIN=$(abspath $(BINARY)) zsh tests/soak.zsh
 
+# This is deliberately opt-in: it needs a separately started loopback Ollama
+# runtime and an already downloaded model named by ZSH_GIT_INLAY_LIVE_OLLAMA_MODEL.
+test-live-ollama: build
+	ZSH_GIT_INLAY_BIN=$(abspath $(BINARY)) zsh tests/live-ollama.zsh
+
 fuzz:
 	$(GO) test -parallel=1 -run '^$$' -fuzz FuzzParseAndSuggestion -fuzztime=$${FUZZ_TIME:-3s} ./internal/command
 	$(GO) test -parallel=1 -run '^$$' -fuzz FuzzReadFrames -fuzztime=$${FUZZ_TIME:-3s} ./internal/ipc
@@ -60,7 +65,7 @@ fuzz:
 lint:
 	$(GO) vet ./...
 	test -z "$$($(GO)fmt -l $$(find cmd internal -name '*.go' -print))"
-	zsh -n zsh-git-inlay.plugin.zsh tests/integration.zsh tests/reliability.zsh tests/evaluation.zsh tests/install.zsh tests/dogfood.zsh tests/soak.zsh
+	zsh -n zsh-git-inlay.plugin.zsh tests/integration.zsh tests/reliability.zsh tests/evaluation.zsh tests/install.zsh tests/dogfood.zsh tests/soak.zsh tests/live-ollama.zsh
 	sh -n scripts/install.sh scripts/install-release.sh scripts/uninstall.sh scripts/checksums.sh scripts/sbom.sh scripts/release-snapshot.sh
 	! rg -n '\beval\b|function[[:space:]]+git\b' zsh-git-inlay.plugin.zsh cmd internal
 
