@@ -681,10 +681,6 @@ func (server *Server) refreshProvider() error {
 	return nil
 }
 
-func (server *Server) finish(fingerprint string, jobID uint64) {
-	server.finishWithError(fingerprint, jobID, "")
-}
-
 func (server *Server) finishWithError(fingerprint string, jobID uint64, failure string) {
 	server.mu.Lock()
 	if current, found := server.jobs[fingerprint]; found && current.id == jobID {

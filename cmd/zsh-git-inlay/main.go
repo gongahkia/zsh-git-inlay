@@ -441,6 +441,9 @@ func evaluateCommand(arguments []string) error {
 			return errors.New("--model requires --provider ollama")
 		}
 		generator, err = evaluation.NewDeterministicDaemonGenerator()
+		if err != nil {
+			return err
+		}
 	case "ollama":
 		if *model == "" {
 			return errors.New("--provider ollama requires --model")
