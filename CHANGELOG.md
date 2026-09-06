@@ -5,6 +5,9 @@ are written before a tag is created; generated snapshots are not releases.
 
 ## Unreleased
 
+- Ran the approved loopback-only Ollama comparison. Qwen2.5-Coder 0.5B,
+  Qwen2.5-Coder 1.5B, and Qwen2.5 0.5B failed the frozen development gate;
+  deterministic remains the default.
 - RC1 adds held-out/adversarial evaluation partitions, bounded native fuzz
   targets, installed-plugin Zsh dogfooding, release-archive installation
   rehearsal, action SHA pinning, and a release/license evidence audit.

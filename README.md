@@ -11,7 +11,7 @@ git commit -m 'chore(cache): update 2 staged files'
               # ^ prepared autosuggestion; accept with the usual forward-char/end-of-line binding
 ```
 
-This is deliberately a proof of interaction, isolation, cache, and freshness properties. It makes no cloud request without an explicit per-provider user grant, and does not use a model download, telemetry, unconsented activity collection, or a second frontend. The deterministic provider is locally verified; optional Ollama and OpenAI adapters have contract coverage, not live quality evidence. See the [RC1 evidence and release decision](docs/EXECPLAN-RC1.md) and [controlled local-model evaluation plan](docs/EXECPLAN-LIVE-MODEL.md).
+This is deliberately a proof of interaction, isolation, cache, and freshness properties. It makes no cloud request without an explicit per-provider user grant, and does not automatically download a model, collect telemetry or unconsented activity, or add a second frontend. The deterministic provider is locally verified; OpenAI has contract coverage only. Three local Ollama models were live-tested and rejected under the frozen gate, not promoted as a default. See the [RC1 evidence and release decision](docs/EXECPLAN-RC1.md) and [controlled local-model evaluation plan](docs/EXECPLAN-LIVE-MODEL.md).
 
 ## Install
 

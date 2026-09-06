@@ -12,8 +12,9 @@ frontend or a commit executor. `evaluate` is an offline administrative harness,
 not an alternative commit-message workflow. The
 deterministic generator remains the default and test oracle. An explicitly
 selected existing local Ollama runtime can generate structured candidates from
-bounded staged-only context; it has mocked contract validation but no
-live-model quality claim on this host. An explicitly selected OpenAI adapter
+bounded staged-only context; mocked contracts and a live development evaluation
+exist, but the three tested Qwen candidates were rejected on this host and no
+Ollama model is recommended. An explicitly selected OpenAI adapter
 also has mock-only contract validation; it is default-deny until a user grants
 the exact cloud context classes and has no live-provider claim on this host.
 

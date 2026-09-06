@@ -398,3 +398,8 @@ must remain off the lookup path.
   quality, live OpenAI compatibility/billing/quality with explicit consent,
   macOS runtime/CI execution, a maintainer-selected license before artifact
   redistribution, and independent security/usability evaluation.
+
+Post-V1 update (2026-09-06): the live local-model gate is no longer absent.
+The approved loopback-only comparison rejected all three tested Qwen models on
+this host; see `EXECPLAN-LIVE-MODEL.md`. The dated milestone observations above
+remain historical and do not describe the current provider decision.

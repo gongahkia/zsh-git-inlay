@@ -29,8 +29,8 @@ budgets; shared-host variation remains an explicit limitation.
 | Gate | Local work | External boundary or current finding |
 | --- | --- | --- |
 | invariants/cache | audit code, tests, cache retention, stale publication and documentation | no external dependency expected |
-| live Ollama | inspect installed runtime/models; exercise only an already available local runtime | `ollama` is absent. Installing it and downloading bounded model weights requires maintainer approval after model/size/license review. |
-| evaluation/grounding | separate held-out and adversarial synthetic evidence; report deterministic results | live-model quality remains unavailable without an approved local model. |
+| live Ollama | inspect installed runtime/models; exercise only an already available local runtime | Initial state was absent; superseded by the approved 2026-09-06 live comparison in `EXECPLAN-LIVE-MODEL.md`, which rejects all three tested models. |
+| evaluation/grounding | separate held-out and adversarial synthetic evidence; report deterministic results | Deterministic held-out evidence remains valid; live models failed development gating, so no held-out model result is claimed. |
 | Zsh dogfooding | real Zsh/autosuggestions automated contract and PTY evidence where the host supports it; add maintainer visual checklist | terminal-pixel appearance and subjective usefulness require a human terminal review. |
 | fuzzing | native bounded Go fuzz campaigns and invariant/property tests | no external dependency expected |
 | static/supply chain | `go vet`, project lint, ShellCheck, workflow/release/script/dependency review | installed Staticcheck is built with Go 1.25 and rejects this Go 1.26 module; `govulncheck` and `actionlint` are absent and will not be installed without approval. Remote CI remains unexecuted. |
@@ -156,26 +156,32 @@ budgets; shared-host variation remains an explicit limitation.
   archive scan found no workspace path, credential marker, cached activity,
   evaluation report, or model weight. Nothing was pushed, published, uploaded,
   or sent to a cloud provider.
+- 2026-09-06: maintainer-approved foreground loopback Ollama evaluation tested
+  Qwen2.5-Coder 0.5B, Qwen2.5-Coder 1.5B, and Qwen2.5 0.5B with the frozen
+  public development corpus. All produced zero prepared candidates and a 100%
+  generation-error rate; deterministic remains default. The exact manifests,
+  CPU latency, RSS samples, and runtime-interruption caveat are in
+  `EXECPLAN-LIVE-MODEL.md`. No cloud request was made.
 
 ## Documentation claim audit
 
 | Capability or claim | RC1 classification |
 | --- | --- |
 | Zsh/autosuggestions frontend, deterministic provider, freshness/isolation/privacy controls, composition, and source/archive lifecycle | Implemented and locally verified |
-| Ollama transport, structured output, cancellation, fallback, and model discovery | Implemented with mocked contract verification; prepared but externally unverified live runtime/model behavior |
+| Ollama transport, structured output, cancellation, fallback, and model discovery | Implemented with mocked contracts and live development execution; tested Qwen models failed operational/structured-output gating and are not selected |
 | OpenAI transport and consent/revocation boundaries | Implemented with mocked contract verification; no credential, consent, or live request authorized |
 | Managed runtime/model acquisition | Prepared and mock-tested; deliberately blocked without authenticated distribution authority |
 | Neovim activity producer | Implemented and locally headless-tested; optional source-tree integration, not a release-archive capability |
 | Linux runtime and release archive | Implemented and locally verified on Fedora 43 |
 | macOS runtime and GitHub Actions result | Prepared but externally unverified; cross-compilation and local workflow lint are not runtime/remote evidence |
-| Local-model quality/default selection, human usability, independent security review | Prepared or deliberately not claimed; no supporting live/human/independent evidence |
+| Local-model quality/default selection, human usability, independent security review | Deterministic remains selected after live model rejection; human usability and independent review remain externally unverified |
 
 ## Release recommendation
 
 **TECHNICALLY READY, EXTERNALLY BLOCKED.** Local correctness, reliability,
 static/supply-chain, packaging, and deterministic-provider gates pass. This is
 not RELEASE-READY because a maintainer license decision is mandatory for
-redistribution and live local-model, remote-CI, macOS-runtime, human visual/
-usability, and independent-review evidence are absent. The deterministic
-provider remains the selected default; no local model is selected. The exact
-maintainer actions are in `RELEASE-CHECKLIST.md`.
+redistribution and remote-CI, macOS-runtime, human visual/usability, and
+independent-review evidence are absent. The deterministic provider remains the
+selected default after the live-model rejection. The exact maintainer actions
+are in `RELEASE-CHECKLIST.md`.

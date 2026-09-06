@@ -42,8 +42,11 @@ warm lookup. Results on this shared Fedora host vary, so a relative regression
 is investigated and recorded rather than attributed without evidence.
 
 The synthetic evaluation corpus measures structural/evidence behavior, not
-human usefulness. Ollama and OpenAI have mocked contract coverage here; no live
-Ollama model or paid OpenAI credential was available for final validation.
+human usefulness. OpenAI has mocked contract coverage only; no paid credential
+or live request was used. Three local Ollama models were later tested through
+the daemon pipeline and rejected on the frozen development gate, so their
+failure does not become a claim of live quality. See
+[EXECPLAN-LIVE-MODEL.md](EXECPLAN-LIVE-MODEL.md).
 
 The evaluator's deterministic control now exercises the daemon's background
 context, provider, grounding, ranking, temporary cache-publication, and exact
