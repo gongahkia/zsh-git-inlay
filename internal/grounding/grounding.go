@@ -59,6 +59,7 @@ var conventionalTypes = map[string]bool{
 func Evaluate(candidates []provider.Candidate, compiled repoctx.Compiled, policy config.RepositoryPolicy) []Result {
 	evidence := map[string]repoctx.Evidence{"metadata:staged": {ID: "metadata:staged"}}
 	components := map[string]bool{}
+	scopes := map[string]bool{}
 	paths := make([]string, 0, len(compiled.Evidence()))
 	hasTestPath := false
 	for _, item := range compiled.Evidence() {
@@ -66,6 +67,9 @@ func Evaluate(candidates []provider.Candidate, compiled repoctx.Compiled, policy
 		paths = append(paths, item.Path)
 		for _, component := range pathTerms(item.Path) {
 			components[component] = true
+		}
+		for _, scope := range scopeTerms(item.Path) {
+			scopes[scope] = true
 		}
 		if isTestPath(item.Path) {
 			hasTestPath = true
@@ -82,12 +86,12 @@ func Evaluate(candidates []provider.Candidate, compiled repoctx.Compiled, policy
 	}
 	results := make([]Result, len(candidates))
 	for index, value := range candidates {
-		results[index] = evaluate(value, evidence, components, hasTestPath, issues, recentTypes, inferredScopes, policy)
+		results[index] = evaluate(value, evidence, components, scopes, hasTestPath, issues, recentTypes, inferredScopes, policy)
 	}
 	return results
 }
 
-func evaluate(value provider.Candidate, evidence map[string]repoctx.Evidence, components map[string]bool, hasTestPath bool, issues, recentTypes map[string]bool, inferredScopes []string, policy config.RepositoryPolicy) Result {
+func evaluate(value provider.Candidate, evidence map[string]repoctx.Evidence, components, scopes map[string]bool, hasTestPath bool, issues, recentTypes map[string]bool, inferredScopes []string, policy config.RepositoryPolicy) Result {
 	result := Result{EvidenceIDs: append([]string(nil), value.EvidenceIDs...)}
 	validEvidence := 0
 	for _, id := range value.EvidenceIDs {
@@ -113,7 +117,7 @@ func evaluate(value provider.Candidate, evidence map[string]repoctx.Evidence, co
 	componentMatch := subjectMatchesComponent(value.Subject, components)
 	scopeValid := true
 	if value.Scope != "" {
-		scopeValid = scopeAllowed(value.Scope, components, inferredScopes, policy)
+		scopeValid = scopeAllowed(value.Scope, scopes, inferredScopes, policy)
 		result.Checks = append(result.Checks, Check{Name: "allowed_scope", Deterministic: true, Passed: scopeValid, Detail: "built-in scope relevance plus repository scope/path policy"})
 		if !scopeValid {
 			result.UnsupportedClaims = append(result.UnsupportedClaims, "unsupported scope")
@@ -280,9 +284,7 @@ func isTestPath(value string) bool {
 }
 
 func pathTerms(value string) []string {
-	value = strings.ToLower(filepath.ToSlash(value))
-	value = strings.TrimSuffix(value, filepath.Ext(value))
-	terms := wordPattern.FindAllString(value, -1)
+	terms := scopeTerms(value)
 	result := make([]string, 0, len(terms))
 	for _, term := range terms {
 		if term != "src" && term != "internal" && term != "cmd" {
@@ -290,6 +292,19 @@ func pathTerms(value string) []string {
 		}
 	}
 	return result
+}
+
+func scopeTerms(value string) []string {
+	value = strings.ToLower(filepath.ToSlash(value))
+	value = strings.TrimPrefix(value, "./")
+	first, _, _ := strings.Cut(value, "/")
+	module := normaliseScope(first)
+	value = strings.TrimSuffix(value, filepath.Ext(value))
+	terms := wordPattern.FindAllString(value, -1)
+	if module != "" {
+		terms = append(terms, module)
+	}
+	return append([]string(nil), terms...)
 }
 
 func subjectMatchesComponent(subject string, components map[string]bool) bool {
@@ -302,10 +317,14 @@ func subjectMatchesComponent(subject string, components map[string]bool) bool {
 }
 
 func scopeMatchesComponent(scope string, components map[string]bool) bool {
+	scope = strings.ToLower(scope)
 	if scope == "repo" {
 		return true
 	}
-	for _, word := range wordPattern.FindAllString(strings.ToLower(scope), -1) {
+	if components[scope] {
+		return true
+	}
+	for _, word := range wordPattern.FindAllString(scope, -1) {
 		if components[word] {
 			return true
 		}
@@ -313,14 +332,26 @@ func scopeMatchesComponent(scope string, components map[string]bool) bool {
 	return false
 }
 
-func scopeAllowed(scope string, components map[string]bool, inferred []string, policy config.RepositoryPolicy) bool {
+func normaliseScope(value string) string {
+	var builder strings.Builder
+	for _, character := range value {
+		if unicode.IsLetter(character) || unicode.IsDigit(character) || strings.ContainsRune("._-", character) {
+			builder.WriteRune(character)
+		} else {
+			builder.WriteByte('-')
+		}
+	}
+	return strings.Trim(builder.String(), "-.")
+}
+
+func scopeAllowed(scope string, scopes map[string]bool, inferred []string, policy config.RepositoryPolicy) bool {
 	if len(policy.Scopes) > 0 && !stringContains(policy.Scopes, scope) {
 		return false
 	}
 	if len(inferred) > 0 {
 		return stringContains(inferred, scope)
 	}
-	return scopeMatchesComponent(scope, components)
+	return scopeMatchesComponent(scope, scopes)
 }
 
 func stringContains(values []string, value string) bool {

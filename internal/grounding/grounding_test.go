@@ -123,6 +123,30 @@ func TestEvaluateAppliesRepositoryTypeScopePathAndWordingPolicy(t *testing.T) {
 	}
 }
 
+func TestGenericPathScopeDoesNotAuthorizeSemanticClaims(t *testing.T) {
+	semantic := map[string]bool{}
+	for _, term := range pathTerms("internal/parser/validation.go") {
+		semantic[term] = true
+	}
+	scopes := map[string]bool{}
+	for _, term := range scopeTerms("internal/parser/validation.go") {
+		scopes[term] = true
+	}
+	if !scopeAllowed("internal", scopes, nil, config.DefaultRepositoryPolicy()) {
+		t.Fatal("exact generic path scope was rejected")
+	}
+	if subjectMatchesComponent("update internal behavior", semantic) {
+		t.Fatal("generic path segment became semantic claim evidence")
+	}
+	moduleScopes := map[string]bool{}
+	for _, term := range scopeTerms("go.mod") {
+		moduleScopes[term] = true
+	}
+	if !scopeAllowed("go.mod", moduleScopes, nil, config.DefaultRepositoryPolicy()) {
+		t.Fatal("exact top-level manifest scope was rejected")
+	}
+}
+
 func groundedContext(t *testing.T) repoctx.Compiled {
 	t.Helper()
 	repository := t.TempDir()

@@ -66,3 +66,8 @@ Cloud grants use the separate user-only commands in [CLOUD.md](CLOUD.md), and
 activity uses the separate user-only commands in [ACTIVITY.md](ACTIVITY.md).
 Neither is a TOML setting. The default deterministic provider remains local and
 available when optional providers are absent; OpenAI has no fallback.
+
+The administrative evaluator never changes this user configuration. Its local
+model mode uses a private temporary daemon configuration with fallback disabled
+so a deterministic result cannot be reported as model output. See the frozen
+protocol and approval boundary in [EXECPLAN-LIVE-MODEL.md](EXECPLAN-LIVE-MODEL.md).

@@ -45,6 +45,14 @@ The synthetic evaluation corpus measures structural/evidence behavior, not
 human usefulness. Ollama and OpenAI have mocked contract coverage here; no live
 Ollama model or paid OpenAI credential was available for final validation.
 
+The evaluator's deterministic control now exercises the daemon's background
+context, provider, grounding, ranking, temporary cache-publication, and exact
+lookup path. Focused tests wait for the worker to finish before removing a
+fixture and persist Git alternate-object access for historical replay, so the
+same path is available to a future local-model run. It deliberately does not
+replace foreground daemon/socket or visual-terminal validation. See
+[EXECPLAN-LIVE-MODEL.md](EXECPLAN-LIVE-MODEL.md) for the live gate.
+
 ## RC1 cache, fuzz, and terminal evidence
 
 The final snapshot-before-remember check removes a result when it is already

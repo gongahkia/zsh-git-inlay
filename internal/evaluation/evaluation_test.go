@@ -12,7 +12,11 @@ import (
 	"time"
 
 	"github.com/gongahkia/zsh-git-inlay/internal/candidate"
+	"github.com/gongahkia/zsh-git-inlay/internal/config"
+	"github.com/gongahkia/zsh-git-inlay/internal/gitstate"
+	"github.com/gongahkia/zsh-git-inlay/internal/grounding"
 	"github.com/gongahkia/zsh-git-inlay/internal/provider"
+	"github.com/gongahkia/zsh-git-inlay/internal/repoctx"
 )
 
 func TestSyntheticCorpusEvaluatesDeterministically(t *testing.T) {
@@ -173,6 +177,35 @@ func TestProviderGeneratorUsesBoundedStagedContext(t *testing.T) {
 	}
 	if len(backend.request.Context) > 16*1024 || !strings.Contains(backend.request.Context, "untrusted repository data") {
 		t.Fatalf("provider context was not bounded/framed: %d bytes", len(backend.request.Context))
+	}
+}
+
+func TestSyntheticFixturesPassDaemonGroundingControl(t *testing.T) {
+	corpus, err := LoadCorpus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fixture := range corpus.Cases {
+		repository, repositoryErr := fixtureRepository(context.Background(), fixture)
+		if repositoryErr != nil {
+			t.Fatal(repositoryErr)
+		}
+		state, stateErr := gitstate.Snapshot(context.Background(), repository)
+		compiled, compileErr := repoctx.Compile(context.Background(), repository, state, "deterministic")
+		response, generateErr := (provider.Deterministic{}).Generate(context.Background(), provider.Request{CWD: repository})
+		if stateErr != nil || compileErr != nil || generateErr != nil {
+			_ = os.RemoveAll(repository)
+			t.Fatalf("fixture %s: snapshot=%v compile=%v generate=%v", fixture.ID, stateErr, compileErr, generateErr)
+		}
+		policy := config.DefaultRepositoryPolicy()
+		reports := grounding.Evaluate(response.Candidates, compiled, policy)
+		if order := grounding.Rank(reports, "conservative"); len(order) == 0 {
+			_ = os.RemoveAll(repository)
+			t.Fatalf("fixture %s has no grounded deterministic candidate: policy=%#v evidence=%#v candidates=%#v reports=%#v", fixture.ID, policy, compiled.Evidence(), response.Candidates, reports)
+		}
+		if removeErr := os.RemoveAll(repository); removeErr != nil {
+			t.Fatal(removeErr)
+		}
 	}
 }
 

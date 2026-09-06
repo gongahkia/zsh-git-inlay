@@ -1,8 +1,12 @@
 # Evaluation
 
 The evaluation harness measures candidate behavior before a local model becomes
-part of the default path. It runs outside ZLE and outside the daemon lookup
-path. The built-in corpus is public, synthetic, versioned as `v2`, and covers
+part of the default path. It runs outside ZLE, but each command evaluation uses
+the daemon's actual background context, provider, grounding, ranking, private
+cache-publication, and exact-lookup code with a temporary private cache. It
+does not open a Unix socket; a separate foreground-daemon rehearsal remains
+necessary to validate socket service behavior. The built-in corpus is public,
+synthetic, versioned as `v2`, and covers
 feature work, bug fixes, refactors, tests, documentation, dependencies,
 renames, deletions, mixed and ambiguous changes, partial staging, misleading
 comments, shell-metacharacter filenames, untrusted issue-like identifiers, and
@@ -43,16 +47,18 @@ Use `--partition development` only while diagnosing a categorized failure.
 Record any prompt change, then run `--partition held-out` for the reported
 comparison. `--partition all` remains regression coverage; it is not a
 held-out quality result. `--provider ollama --model <already-installed-model>`
-uses the same bounded staged context compiler as the daemon and never pulls a
-model. This host has no Ollama runtime/model, so completed RC1 runs evaluate
-only the deterministic provider; no model-comparison claim follows from that
-absence.
+first discovers the already-local model to record its tag digest and size, then
+uses the daemon pipeline above. It never pulls a model and forces fallback to
+`none`, so a deterministic candidate cannot be counted as model output. This
+host has no Ollama runtime/model, so completed runs evaluate only the
+deterministic control; no model-comparison claim follows from that absence.
 
 ## Metrics and interpretation
 
-Each report records provider/model/runtime/quantization/prompt metadata,
-provider settings, evaluator timeout and commit limit, OS/architecture/CPU
-count/Go version, and cold/warm generation timing. Process allocation is an
+Each report records the corpus SHA-256, provider/model/runtime/quantization/
+prompt metadata, local model digest and size when available, provider settings,
+evaluator timeout and commit limit, OS/architecture/CPU count/Go version, and
+cold/warm average, p50, and p95 generation timing. Process allocation is an
 approximate measurement, not a model-memory claim.
 
 Automatic metrics cover:
@@ -64,6 +70,9 @@ Automatic metrics cover:
 - unsupported issue identifiers, test-outcome claims, and behavioral-claim tokens;
 - structural grounding coverage across the automatic shape/component/claim
   checks;
+- actual daemon-grounding coverage for candidates published through the
+  conservative ranking policy;
+- exact candidate-sequence equality between each cold and immediate warm run;
 - candidate diversity;
 - cold and warm latency, approximate allocation, timeout rate, and error rate.
 
@@ -74,22 +83,33 @@ unquestionable ground truth, and string similarity is deliberately not scored.
 Structural grounding coverage is likewise a report-level proxy over candidate
 shape, changed components, and unsupported tokens; it is not a substitute for
 the daemon's evidence-ID grounding diagnostics or semantic proof. The Markdown
-report labels this manual-review boundary explicitly.
+report labels this manual-review boundary explicitly. A report does not prove
+semantic correctness, user preference, peak model memory, CPU use,
+socket-host behavior, or terminal pixels.
 
 No private corpus directory is created or used by default. Known local
 evaluation-report patterns are ignored by Git, while default reports are kept
 outside the repository. Do not pass a repository working tree as
 `--output-dir` when evaluating private history.
 
-## RC1 deterministic evidence
+## Frozen daemon-path deterministic control
 
-The 2026-09-05 Fedora RC1 run used corpus `v2` and the built-in deterministic
-provider. Development had 8 cases/24 candidates and held-out had 7/21. Every
-applicable automatic check passed in both partitions: output shape,
-conventional format, declared scope and length, changed/allowed component,
-issue/test-outcome/behavioral-claim rejection, and structural-grounding proxy.
-The held-out run averaged 1.784 ms cold, 1.726 ms warm, and 326,128 bytes of
-process allocation per case; its timeout and error rates were zero.
+The frozen 2026-09-06 Fedora control is corpus `v2`, SHA-256
+`99cbe770cb27d2e9e1a99f74e8d16fb6cb5b88e50f5c3cfd8a417d6287fd6361`, prompt
+`v1`, deterministic provider, conservative grounding, `fallback = "none"`,
+and a 10-second evaluator deadline. Development had 8 cases/24 candidates and
+held-out had 7/21. Every automatic shape, policy, issue/test-outcome/
+behavioral-claim, structural-grounding, daemon-grounding, and repeated-run
+check passed in both partitions; timeout and error rates were zero.
+
+Development averaged 31.49 ms cold (p50 33.27, p95 34.75) and 30.66 ms warm
+(p50 32.29, p95 33.90), with 20,776,536 bytes approximate aggregate process
+allocation. Held-out averaged 33.86 ms cold (p50 33.74, p95 36.27) and 33.34
+ms warm (p50 33.94, p95 34.83), with 20,124,376 bytes approximate aggregate
+allocation. These are control measurements through the daemon pipeline, not
+local-model quality or model-memory evidence. The older direct-provider RC1
+measurements are retained in execution history but are not comparable controls
+because they bypassed publication and ranking.
 
 A separate local-history replay of 20 eligible project commits produced 60
 candidates with no generation errors or timeout. It reported 80% changed-
@@ -100,8 +120,10 @@ not tuned away and not a model-quality score.
 
 These results validate the harness and deterministic fallback only. They do
 not establish semantic usefulness, human preference, or local-model quality.
-No prompt was iterated against the held-out partition in RC1. A local-model
-selection requires a recorded development comparison followed by a held-out
-run, zero malformed/timeout/error results under the selected operational
-timeout, and manual review of grounded factual adequacy. No model satisfies
-that evidence standard yet because no Ollama runtime/model is installed.
+No prompt was iterated against the held-out partition. A local-model selection
+requires a recorded development comparison, three held-out runs, zero
+malformed/unpublished/timeout/error results under the selected operational
+timeout, no unsupported claims, manual review of factual adequacy, and an
+improvement over this control. The complete acceptance criteria and approval
+boundary are in [EXECPLAN-LIVE-MODEL.md](EXECPLAN-LIVE-MODEL.md). No model
+satisfies that evidence standard because no Ollama runtime/model is installed.

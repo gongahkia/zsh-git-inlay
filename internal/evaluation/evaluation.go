@@ -900,6 +900,13 @@ func replayRepository(ctx context.Context, source, objects, parent, commit strin
 	if err := git(ctx, directory, environment, "init", "-q", "-b", "main"); err != nil {
 		return fail(err)
 	}
+	alternates := filepath.Join(directory, ".git", "objects", "info", "alternates")
+	if err := os.MkdirAll(filepath.Dir(alternates), 0o700); err != nil {
+		return fail(err)
+	}
+	if err := os.WriteFile(alternates, []byte(objects+"\n"), 0o600); err != nil {
+		return fail(err)
+	}
 	if err := git(ctx, directory, environment, "read-tree", parent+"^{tree}"); err != nil {
 		return fail(err)
 	}

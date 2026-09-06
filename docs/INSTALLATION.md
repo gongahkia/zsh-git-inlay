@@ -23,6 +23,11 @@ runtime prerequisites with DNF:
 sudo dnf install git zsh zsh-autosuggestions golang
 ```
 
+Ollama is optional and is not an installation requirement or implicit model
+download. The controlled live-model evaluation has a separate explicit approval
+boundary, reviewed Fedora package method, disk footprint, and cleanup choices
+in [EXECPLAN-LIVE-MODEL.md](EXECPLAN-LIVE-MODEL.md).
+
 Build from a checked-out source tree, then use the local installer. It neither
 downloads a model nor edits `.zshrc`:
 

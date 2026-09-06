@@ -167,12 +167,17 @@ func PrepareForEvaluation(ctx context.Context, settings config.Settings, cwd, ca
 			if err := json.Unmarshal(lookup.Payload, &record); err != nil {
 				return Record{}, fmt.Errorf("decode evaluation record: %w", err)
 			}
-			return record, nil
+			if !server.pending(state.Fingerprint) {
+				return record, nil
+			}
 		}
-		if lookup.Status != "pending" {
+		if lookup.Status != "pending" && lookup.Status != "ready" {
 			return Record{}, fmt.Errorf("evaluation lookup %s: %s", lookup.Status, lookup.Error)
 		}
 		if !server.pending(state.Fingerprint) {
+			if lookup.Status == "ready" {
+				continue
+			}
 			if failure := server.failure(state.Fingerprint); failure != "" {
 				return Record{}, fmt.Errorf("evaluation generation failed: %s", failure)
 			}

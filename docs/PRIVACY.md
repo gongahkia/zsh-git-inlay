@@ -28,6 +28,12 @@ URLs, credentials, candidates, or provider grants. See [LEARNING.md](LEARNING.md
 Evaluation reports default to private XDG state storage and intentionally omit
 raw replay diffs.
 
+The controlled local-model evaluator uses only the checked-in synthetic corpus
+and a private temporary cache. Its model discovery and inference endpoint is
+loopback-only; a model pull, if separately approved, contacts the registry for
+weights but does not send repository context there. The exact approval and
+cleanup boundary is [EXECPLAN-LIVE-MODEL.md](EXECPLAN-LIVE-MODEL.md).
+
 The runtime socket is `0600` in a `0700` directory. Cache, state, and data
 paths follow the XDG locations in [INSTALLATION.md](INSTALLATION.md); test and
 troubleshooting overrides are documented there and in the runtime diagnostics.
