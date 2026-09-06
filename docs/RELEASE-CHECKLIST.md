@@ -3,8 +3,8 @@
 ## Current classification
 
 **TECHNICALLY READY, EXTERNALLY BLOCKED** is the RC1 conclusion. It is not
-RELEASE-READY because the project has no selected license, no live local-model
-result, no remote CI execution, no macOS runtime execution, and no maintainer
+RELEASE-READY because the project has no selected license, no remote CI
+execution, no macOS runtime execution, and no maintainer
 visual/usability or independent review. No release is created by this checklist.
 
 ## Local RC1 evidence
@@ -13,7 +13,8 @@ visual/usability or independent review. No release is created by this checklist.
 | --- | --- |
 | Exact staged fingerprint, repository/worktree isolation, stale rejection, private socket/cache, default-deny activity/cloud controls, and non-committing compose | Locally tested and code-audited |
 | Deterministic held-out evaluation | 7 cases / 21 candidates; all applicable automatic checks pass; no timeout/error |
-| Ollama and OpenAI | Mock/contract tested only; no runtime/model download or cloud request |
+| Ollama | Three approved local models ran through the daemon pipeline and were rejected: zero prepared candidates and 100% generation errors under the frozen 10-second gate; deterministic remains default |
+| OpenAI | Mock/contract tested only; no cloud request |
 | Fuzzing | Seven bounded native targets pass; no findings |
 | Static/supply-chain checks | `go vet`, fresh Staticcheck, `govulncheck`, ShellCheck, YAML/actionlint, `go mod verify`, and action SHA review pass locally |
 | Zsh dogfooding | Installed plugin, real Zsh sessions, and pseudo-terminal ghost-text output pass; no human pixel review |
@@ -52,32 +53,16 @@ Select a license and complete the exact follow-through in
 [LICENSE-REVIEW.md](LICENSE-REVIEW.md). This is mandatory before public
 redistribution.
 
-### Approved live local-model rehearsal
+### Live local-model decision
 
-Do this only after the maintainer explicitly approves installing Fedora's
-Ollama package and downloading the bounded comparison set. RC1 inspected
-Fedora metadata: Ollama 0.9.4 is a 61 MiB download / 772.8 MiB installed;
-three reviewed models total about 1.782 GB (398 MB + 986 MB + 398 MB). No paid
-service, cloud provider, source upload, telemetry upload, or remote install
-script is needed.
-
-```zsh
-sudo dnf install ollama
-ollama serve
-ollama pull qwen2.5-coder:0.5b
-ollama pull qwen2.5-coder:1.5b
-ollama pull qwen2.5:0.5b
-zsh-git-inlay doctor --json
-zsh-git-inlay evaluate --fixtures --provider ollama --model qwen2.5-coder:0.5b --partition development --json
-zsh-git-inlay evaluate --fixtures --provider ollama --model qwen2.5-coder:0.5b --partition held-out --json
-```
-
-Repeat the two evaluation commands for each candidate model and record cold
-load, warm generation, time-to-first-token when the runtime exposes it,
-process-resident memory, cancellation, timeout, malformed output, daemon
-restart, staged-state supersession, model removal, and deterministic fallback.
-Do not declare a default local model without this comparison and manual review
-of the held-out candidates.
+The approved local rehearsal completed with three installed models. Every
+candidate failed the frozen development gate (zero prepared candidates and a
+100% generation-error rate), so deterministic remains the selected default.
+No local model is recommended or included in the release decision. The actual
+RPM transaction selected ROCm dependencies and used 8 GiB installed space,
+rather than the earlier RPM-only 772.8 MiB estimate. See
+[EXECPLAN-LIVE-MODEL.md](EXECPLAN-LIVE-MODEL.md) for pinned manifests, CPU
+latency, RSS samples, failure categories, and the service-interruption caveat.
 
 ### Remote CI and macOS
 

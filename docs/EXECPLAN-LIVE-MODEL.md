@@ -4,33 +4,40 @@
 
 This plan starts from the RC1 assessment at `df3ce50`. The local repository had
 no `ollama` executable, installed package, system unit, reachable loopback
-runtime, or model manifest when inspected on 2026-09-06. The existing
-`~/.ollama` directory is not treated as product data and its contents are not
-read by this plan. No model, runtime, source context, cloud request, artifact,
-or telemetry was uploaded by this work.
+runtime, or model manifest when first inspected on 2026-09-06. The maintainer
+then approved and performed the bounded Fedora installation; this work pulled
+only the three named models and used only the loopback runtime with synthetic
+fixtures. No source context, cloud request, artifact, or telemetry was
+uploaded by this work.
 
-The live evaluation is blocked pending explicit maintainer approval for the
-bounded installation and downloads below. The deterministic provider remains
-the selected default until a model satisfies every acceptance criterion.
+The completed development comparison rejects all three tested models for this
+host and frozen product settings. The deterministic provider remains the
+selected and validated default. No held-out run or prompt iteration was
+appropriate after every candidate failed the development safety/operational
+gate.
 
 ## Approval boundary
 
-Fedora 43 currently offers `ollama-0.9.4-4.fc43.x86_64` from the `fedora`
-repository: 61.0 MiB download and 772.8 MiB installed. Its package file list
-contains the executable and local libraries, but no systemd unit. The proposed
-runtime is therefore a foreground, per-evaluation `ollama serve` bound to
-`127.0.0.1:11434`; this plan does not enable or create a service.
+Fedora 43 supplied `ollama-0.9.4-4.fc43.x86_64` from the `fedora` repository.
+The RPM itself is 61.0 MiB to download and 772.8 MiB installed, but the actual
+approved transaction selected ROCm dependencies: DNF reported 1.4 GiB inbound
+and 8 GiB installed. This is the authoritative footprint for this host; the
+earlier RPM-only estimate was incomplete. The package list contains no systemd
+unit, and all testing used a foreground `ollama serve` bound to
+`127.0.0.1:11434`. This work did not enable or create a service.
 
-| Candidate | Official current tag digest | Download | Parameters / quantization | License |
+| Candidate | Installed tag digest | Installed size | Parameters / quantization | License |
 | --- | --- | ---: | --- | --- |
-| `qwen2.5-coder:0.5b` | `4ff64a7f502a` | 398 MB | 494M / Q4_K_M | Apache-2.0 |
-| `qwen2.5-coder:1.5b` | `d7372fd82851` | 986 MB | 1.54B / Q4_K_M | Apache-2.0 |
-| `qwen2.5:0.5b` | `a8b0c5157701` | 398 MB | 494M / Q4_K_M | Apache-2.0 |
+| `qwen2.5-coder:0.5b` | `4ff64a7f502a08b7616edb8ca0a79eb1853fc363d842b7df4b46915d11a3fb09` | 397,821,516 B | 494.03M / Q4_K_M | Apache-2.0 |
+| `qwen2.5-coder:1.5b` | `d7372fd828518a4d38b1eb196c673c31a85f2ed302b3d1e406c4c2d1b64a0668` | 986,062,089 B | 1.5B / Q4_K_M | Apache-2.0 |
+| `qwen2.5:0.5b` | `a8b0c51577010a279d933d14c2a8ab4b268079d44c5c8830c0a93900f1827c67` | 397,821,319 B | 494.03M / Q4_K_M | Apache-2.0 |
 
-The model downloads total 1,782 MB (about 1.8 GB) and are stored under the
-user's Ollama data directory. The live run records the actually installed
-digest, size, quantization, and CLI version; tags are not treated as immutable.
-The host had 728 GiB free disk and 7.9 GiB available RAM at inspection time.
+The installed model manifests total 1,781,704,924 bytes. Ollama reported
+CPU-only inference with no compatible GPU. `ollama --version` and
+`/api/version` both reported `0.0.0` despite the installed Fedora package
+NEVRA above; that discrepancy is recorded, not normalized away. Tags are not
+treated as immutable. The host had 7.9 GiB available RAM at initial runtime
+inspection.
 
 The upstream `install.sh` was inspected but is deliberately not used: on Linux
 it modifies `/usr/local`, removes a prior runtime directory, creates a system
@@ -58,6 +65,58 @@ ollama rm qwen2.5-coder:0.5b qwen2.5-coder:1.5b qwen2.5:0.5b
 
 Removing the RPM with `sudo dnf remove ollama` is a separate maintainer choice;
 this plan will neither remove it nor alter pre-existing `~/.ollama` data.
+
+## Live development result and provider decision
+
+The frozen development corpus was run through the actual daemon preparation
+pipeline: staged context compilation, loopback Ollama generation, structured
+decoding, conservative grounding/ranking, private cache publication, and exact
+lookup. Each of the eight public synthetic development cases generated once
+cold and once warm, with fallback forced to `none`. Reports were written to
+private temporary directories and removed after their aggregate results were
+recorded here.
+
+| Model | Candidate count | Error rate | Timeout rate | Cold avg / p95 | Warm avg / p95 | Result |
+| --- | ---: | ---: | ---: | --- | --- | --- |
+| `qwen2.5-coder:0.5b` | 0 | 100% | 75% | 9,969.79 / 10,024.91 ms | 8,740.15 / 10,018.91 ms | reject |
+| `qwen2.5-coder:1.5b` | 0 | 100% | 100% | 10,008.87 / 10,015.85 ms | 10,007.71 / 10,012.55 ms | reject |
+| `qwen2.5:0.5b` (clean single-model rerun) | 0 | 100% | 43.75% | 9,881.10 / 10,016.40 ms | 6,624.09 / 10,006.71 ms | reject |
+
+The 0.5B coder model produced six cold/warm timeout pairs; the remaining
+attempts were invalid structured candidates or had no candidate eligible after
+grounding. The 1.5B coder model timed out on all 16 calls. In the clean general
+model rerun, all eight cold calls either timed out or reached the evaluator
+deadline, and every non-timeout warm call was rejected as an invalid structured
+candidate. No malformed response reached a prepared record, and no
+deterministic fallback was used.
+
+An earlier general-model run was excluded from selection evidence after the
+loopback service became unreachable mid-run; its later fixture calls failed
+with connection refusal. The termination cause is unverified: kernel logs were
+not readable, while the user journal showed the foreground terminal's PTY
+eventually closed. It is not labeled an OOM kill. A fresh foreground runtime
+and one-model rerun produced the general-model row above.
+
+The Ollama runner RSS samples were approximately 683 MiB for the 0.5B coder,
+1.30 GiB for the 1.5B coder, and 685--854 MiB for the general 0.5B model. The
+first sequential comparison retained multiple runners for the product's fixed
+five-minute keep-alive and depleted available swap; therefore swap is not a
+clean per-model measurement and is not used to claim the memory gate passed.
+The fresh general rerun loaded one runner, but inherited nearly exhausted swap.
+
+The opt-in `make test-live-ollama` rehearsal with `qwen2.5:0.5b` exercised the
+actual isolated product daemon and Unix socket. It stopped after 12 seconds
+with no prepared candidate, which is the safe expected failure for this model;
+it does not establish a successful model-backed Zsh suggestion. Existing
+deterministic and mocked-provider tests remain the evidence for stale rejection
+and malformed-output non-rendering.
+
+No model reached the development threshold, so held-out evaluation, three-run
+repeatability, model selection, human candidate review, and prompt iteration
+were deliberately not performed. Altering the frozen prompt, timeout, or
+fallback to rescue an individual model would not be a defensible comparison.
+The default remains `deterministic`; Ollama remains an implemented local
+provider whose tested candidate models are not recommended on this host.
 
 ## Frozen protocol and acceptance criteria
 
@@ -97,7 +156,7 @@ generation; warm latency is measured by each immediately repeated generation.
 Peak resident memory and CPU are sampled from the local Ollama process during
 the live runs and reported as approximate measurements.
 
-## Reproduction sequence after approval
+## Reproduction sequence
 
 1. Record `ollama --version`, `ollama list`, the selected model's actual
    digest/size/quantization, `df -h`, `free -h`, and the current commit. Do not
@@ -144,5 +203,6 @@ daemon-path control measurements, not local-model quality results.
 
 The older RC1 direct-provider report remains historical evidence; it is not
 used for model selection because it bypassed publication/ranking. No prompt
-iteration, model-specific tuning, live Ollama request, or provider selection
-has occurred in this plan.
+iteration or model-specific tuning occurred. The live development evidence
+selects the deterministic provider by rejecting each tested Ollama model, not
+by claiming a model-quality win for deterministic text.

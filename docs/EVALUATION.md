@@ -49,9 +49,23 @@ comparison. `--partition all` remains regression coverage; it is not a
 held-out quality result. `--provider ollama --model <already-installed-model>`
 first discovers the already-local model to record its tag digest and size, then
 uses the daemon pipeline above. It never pulls a model and forces fallback to
-`none`, so a deterministic candidate cannot be counted as model output. This
-host has no Ollama runtime/model, so completed runs evaluate only the
-deterministic control; no model-comparison claim follows from that absence.
+`none`, so a deterministic candidate cannot be counted as model output.
+
+## Live local-model result
+
+On 2026-09-06, the public development partition was run through a foreground,
+loopback-only Fedora Ollama runtime with the frozen `v1` prompt and 10-second
+deadline. `qwen2.5-coder:0.5b`, `qwen2.5-coder:1.5b`, and `qwen2.5:0.5b` all
+produced zero prepared candidates and a 100% generation-error rate. Their
+timeout rates were respectively 75%, 100%, and 43.75% in the clean
+single-model rerun for the general model. The detailed digests, latency,
+runtime interruption, RSS samples, and rejection rationale are in
+[EXECPLAN-LIVE-MODEL.md](EXECPLAN-LIVE-MODEL.md).
+
+No prompt change, held-out run, or human preference claim follows from failed
+development gating. The deterministic provider remains the default; the tested
+Ollama models are not recommended on this host under the product's 10-second
+background deadline.
 
 ## Metrics and interpretation
 
@@ -126,4 +140,5 @@ malformed/unpublished/timeout/error results under the selected operational
 timeout, no unsupported claims, manual review of factual adequacy, and an
 improvement over this control. The complete acceptance criteria and approval
 boundary are in [EXECPLAN-LIVE-MODEL.md](EXECPLAN-LIVE-MODEL.md). No model
-satisfies that evidence standard because no Ollama runtime/model is installed.
+satisfies that evidence standard because each tested model failed the
+development operational and structured-output gates.
