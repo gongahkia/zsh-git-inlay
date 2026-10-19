@@ -70,3 +70,6 @@ before declaring completion.
   [Go exec WaitDelay](https://pkg.go.dev/os/exec#Cmd) bound stalled startup and
   inherited output pipes. Isolated-home race tests cover strict broken-config
   defaults, startup noise, output caps and hung startup children.
+- Socket repair now verifies type, owner, private parent, connection refusal and
+  unchanged inode. Live sockets, regular files and transient dial failures are
+  preserved. This also replaces the daemon's previous any-dial-error cleanup.

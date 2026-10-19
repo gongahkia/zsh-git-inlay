@@ -1397,22 +1397,15 @@ func cacheFilename(name string) (string, bool) {
 }
 
 func prepareSocket(socket string) (bool, error) {
-	info, err := os.Lstat(socket)
-	if os.IsNotExist(err) {
-		return false, nil
-	}
+	state, err := InspectSocket(socket)
 	if err != nil {
 		return false, err
 	}
-	if info.Mode()&os.ModeSocket == 0 {
-		return false, fmt.Errorf("refusing to replace non-socket %s", socket)
-	}
-	connection, dialErr := net.DialTimeout("unix", socket, 20*time.Millisecond)
-	if dialErr == nil {
-		connection.Close()
+	if state == "running" {
 		return true, nil
 	}
-	if err := os.Remove(socket); err != nil {
+	if state == "stale" {
+		_, err = RepairStaleSocket(socket)
 		return false, err
 	}
 	return false, nil
