@@ -142,3 +142,21 @@ normal grounding and policy. `deterministic-baseline` selects the unchanged
 metadata-template generator globally or with `evaluate --provider
  deterministic-baseline` for comparisons. Existing frozen reports retain their
 original meaning and are not replaced by results for the new provider.
+
+## Reproducible local model qualification
+
+With an already-running local Ollama and an already-installed explicit model,
+run `python3 scripts/qualify-model.py --model <tag> --output-dir <new-private-dir>`.
+The runner never installs/pulls a model or uses cloud inference. It isolates
+configuration, disables fallback, uses one generation at a time, and records
+budgets and private reports. Development failure stops immediately; only a
+passing development gate permits three held-out runs. Model digest, corpus and
+prompt identity must stay fixed. `--context-tokens`, `--output-tokens`,
+`--warm-timeout`, `--cold-timeout` and `--keep-alive` support measured experiments.
+
+Automatic gates check prepared output, policy/grounding checks, errors,
+timeouts and warm pipeline p95. A passing result explicitly requires human
+review; it does not recommend the model or establish semantic usefulness.
+Runtime failures are recorded as terminal failures, not as pending work.
+Evaluation honors global Ollama settings while the per-generation evaluation
+deadline still caps them.
