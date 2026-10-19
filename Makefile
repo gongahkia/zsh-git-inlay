@@ -7,7 +7,7 @@ DIST ?= dist/release-snapshot
 LDFLAGS := -s -w -buildid= -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 BUILD_FLAGS := -trimpath -buildvcs=false -ldflags "$(LDFLAGS)"
 
-.PHONY: all build test test-go test-zsh test-eval test-reliability test-nvim test-install test-integration test-dogfood test-soak test-live-ollama fuzz lint bench release-snapshot clean
+.PHONY: all build test test-setup test-packaging test-go test-zsh test-eval test-reliability test-nvim test-install test-integration test-dogfood test-soak test-live-ollama fuzz lint bench release-snapshot clean
 
 all: build
 
