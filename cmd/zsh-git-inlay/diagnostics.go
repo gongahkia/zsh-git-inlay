@@ -12,11 +12,27 @@ import (
 )
 
 func repositoryDiagnostic(cwd, buffer string) daemon.Diagnostic {
+	if decision, err := clientControl(""); err != nil || decision.Status != "enabled" {
+		reason := "Suggestion control applies to " + decision.Scope
+		if err != nil {
+			reason = err.Error()
+		}
+		return daemon.Diagnostic{Status: decision.Status, Reason: reason, Action: daemon.DiagnosticAction(decision.Status)}
+	}
 	reply, err := call(ipc.Request{Version: ipc.Version, Operation: "diagnose", CWD: cwd}, 2*time.Second)
 	value := daemon.Diagnostic{Status: "daemon_unavailable"}
 	if err == nil {
 		if json.Unmarshal(reply.Payload, &value) != nil {
 			value.Status = "malformed"
+		}
+	} else {
+		ctx, cancel := gitstate.WithTimeout()
+		state, snapshotErr := gitstate.Snapshot(ctx, cwd)
+		cancel()
+		if snapshotErr == nil && state.RepoID != "" {
+			if decision, controlErr := clientControl(state.RepoID); controlErr != nil || decision.Status != "enabled" {
+				value.Status = decision.Status
+			}
 		}
 	}
 	if buffer != "" {

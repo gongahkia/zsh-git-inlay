@@ -52,3 +52,8 @@ before declaring completion.
   after ranking. Global learning disable prevents collection and reuse. Relevant
   configuration/provider/daemon/grounding/Git/CLI packages passed race tests.
   Wizard exposure remains part of task 4.
+- Controls and explicit feedback are implemented; lookup checks persisted state
+  independently of notifications, pending generation is cancellable, snoozes
+  expire, and explicit usefulness labels contain only scoped hashes. Feedback
+  retention is bounded and clearing leaves no backup copy. Integration rehearsal
+  and doctor/wizard exposure remain to be completed.

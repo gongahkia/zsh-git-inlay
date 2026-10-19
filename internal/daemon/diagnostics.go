@@ -30,6 +30,7 @@ func (server *Server) diagnose(cwd string) ipc.Reply {
 	if diagnostic.Status == "ready" {
 		reply := server.lookup(ipc.Request{Version: ipc.Version, Operation: "lookup", Fingerprint: state.Fingerprint, Repository: state.RepoID, Worktree: state.WorktreeID})
 		diagnostic.Status = reply.Status
+		diagnostic.Reason = reply.Error
 		if reply.Status == "ready" {
 			var record Record
 			if json.Unmarshal(reply.Payload, &record) == nil {
@@ -38,7 +39,7 @@ func (server *Server) diagnose(cwd string) ipc.Reply {
 					diagnostic.Status = "body_required"
 				}
 			}
-		} else if failure := server.failure(state.Fingerprint); failure != "" {
+		} else if failure := server.failure(state.Fingerprint); failure != "" && (reply.Status == "pending" || reply.Status == "stale") {
 			diagnostic.Status = "generation_failed"
 			diagnostic.Reason = failure
 			if strings.Contains(failure, "grounding") || strings.HasPrefix(failure, "rank candidates:") {
@@ -55,6 +56,10 @@ func (server *Server) diagnose(cwd string) ipc.Reply {
 
 func DiagnosticAction(status string) string {
 	switch status {
+	case "disabled", "snoozed":
+		return "Run zsh-git-inlay control status --repo, then enable the disabled scope or wait for its snooze to expire."
+	case "controls_invalid":
+		return "Run zsh-git-inlay doctor to inspect the private controls file; restore its backup or correct the reported cause."
 	case "ready":
 		return "Type git commit -m followed by a space; accept with your usual autosuggestion binding."
 	case "pending":

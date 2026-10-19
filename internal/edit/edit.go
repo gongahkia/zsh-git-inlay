@@ -50,6 +50,28 @@ type Store struct {
 	afterWrite func(int) error
 }
 
+// UpdatePrivate atomically updates one application-owned private state file.
+// Unlike user-file edits it retains no backup, so bounded feedback/history can
+// actually be cleared. fn runs under a process-wide advisory directory lock.
+func UpdatePrivate(path string, fn func([]byte) ([]byte, error)) error {
+	store := Store{Dir: filepath.Dir(path)}
+	return store.locked(func() error {
+		snapshot, err := Read(path)
+		if err != nil {
+			return err
+		}
+		info, statErr := os.Lstat(snapshot.Path)
+		if snapshot.Exists && (statErr != nil || info.Mode()&os.ModeSymlink != 0 || snapshot.Mode.Perm()&0o077 != 0) {
+			return fmt.Errorf("state file must be private and not a symlink: %s", path)
+		}
+		data, err := fn(snapshot.Data)
+		if err != nil {
+			return err
+		}
+		return apply(Change{Before: snapshot, Data: data, Mode: 0o600})
+	})
+}
+
 // Read follows an existing file symlink, and records both names so replacing or
 // retargeting that symlink is detected before the write. Atomic writes replace
 // the target file, never the symlink in a dotfiles checkout.

@@ -70,8 +70,17 @@ func EvaluationDir() (string, error) {
 
 // DataDir stores user-approved managed runtimes and models.
 func DataDir() (string, error) {
+	path, err := DataPath()
+	if err != nil {
+		return "", err
+	}
+	return ensurePrivate(path)
+}
+
+// DataPath resolves the location without creating directories during lookup.
+func DataPath() (string, error) {
 	if override := os.Getenv("ZSH_GIT_INLAY_DATA_DIR"); override != "" {
-		return ensurePrivate(override)
+		return filepath.Abs(override)
 	}
 	base := os.Getenv("XDG_DATA_HOME")
 	if base == "" {
@@ -81,7 +90,7 @@ func DataDir() (string, error) {
 		}
 		base = filepath.Join(home, ".local", "share")
 	}
-	return ensurePrivate(filepath.Join(base, "zsh-git-inlay"))
+	return filepath.Abs(filepath.Join(base, "zsh-git-inlay"))
 }
 
 func SocketPath() (string, error) {
@@ -96,9 +105,6 @@ func ensurePrivate(path string) (string, error) {
 	if err := os.MkdirAll(path, 0o700); err != nil {
 		return "", fmt.Errorf("create private directory %s: %w", path, err)
 	}
-	if err := os.Chmod(path, 0o700); err != nil {
-		return "", fmt.Errorf("set private directory permissions: %w", err)
-	}
 	info, err := os.Lstat(path)
 	if err != nil {
 		return "", err
@@ -112,8 +118,8 @@ func ensurePrivate(path string) (string, error) {
 			return "", fmt.Errorf("private path %s is not owned by this user", path)
 		}
 	}
-	if info.Mode().Perm()&0o077 != 0 {
-		return "", fmt.Errorf("private path %s is accessible by other users", path)
+	if err := os.Chmod(path, 0o700); err != nil {
+		return "", fmt.Errorf("set private directory permissions: %w", err)
 	}
 	return path, nil
 }

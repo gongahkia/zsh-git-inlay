@@ -19,6 +19,7 @@ import (
 	"github.com/gongahkia/zsh-git-inlay/internal/candidate"
 	"github.com/gongahkia/zsh-git-inlay/internal/cloud"
 	"github.com/gongahkia/zsh-git-inlay/internal/config"
+	"github.com/gongahkia/zsh-git-inlay/internal/control"
 	"github.com/gongahkia/zsh-git-inlay/internal/gitstate"
 	"github.com/gongahkia/zsh-git-inlay/internal/grounding"
 	"github.com/gongahkia/zsh-git-inlay/internal/ipc"
@@ -75,9 +76,10 @@ type CacheStatus struct {
 }
 
 type Server struct {
-	settings config.Settings
-	socket   string
-	cacheDir string
+	settings    config.Settings
+	socket      string
+	cacheDir    string
+	controlPath string // empty only in explicitly isolated evaluation/test servers
 
 	mu               sync.Mutex
 	cacheMu          sync.Mutex
@@ -256,6 +258,11 @@ func Serve(ctx context.Context, settings config.Settings, initialCWD string) err
 		grants, _ = cloud.New(dataDir)
 	}
 	server := newServerWithCloud(settings, socket, cacheDir, events, learner, grants)
+	server.controlPath, err = control.Path()
+	if err != nil {
+		listener.Close()
+		return err
+	}
 	if err := server.collectCache(); err != nil {
 		listener.Close()
 		return err
@@ -339,6 +346,13 @@ func (server *Server) handle(connection net.Conn) {
 		reply = server.learningChanged(request.CWD)
 	case "cloud_changed":
 		reply = server.cloudChanged(request.Provider)
+	case "controls_changed":
+		server.mu.Lock()
+		for _, pending := range server.jobs {
+			pending.cancel()
+		}
+		server.mu.Unlock()
+		reply = ipc.Reply{Version: ipc.Version, Status: "ready"}
 	case "stop":
 		reply = ipc.Reply{Version: ipc.Version, Status: "stopping"}
 		go server.Close()
@@ -369,6 +383,9 @@ func (server *Server) observeWithContext(parent context.Context, cwd string, ref
 	}
 	if state.Availability != gitstate.Ready {
 		return server.noteObserve(ipc.Reply{Version: ipc.Version, Status: string(state.Availability), Error: state.Reason})
+	}
+	if decision := server.controlReply(state.RepoID); decision != nil {
+		return server.noteObserve(*decision)
 	}
 	activityProvenance := server.activity.Provenance(state.RepoID, state.WorktreeID)
 	cached, cacheErr := server.load(state.Fingerprint)
@@ -432,6 +449,10 @@ func (server *Server) generate(ctx context.Context, expected gitstate.State, cwd
 	case <-ctx.Done():
 		return
 	}
+	if decision := server.controlReply(expected.RepoID); decision != nil {
+		failure = decision.Status
+		return
+	}
 	activityProvenance := server.activity.Provenance(expected.RepoID, expected.WorktreeID)
 	compiled, compileErr := server.compileContext(ctx, cwd, expected, activityProvenance.Signals)
 	if compileErr != nil {
@@ -481,6 +502,10 @@ func (server *Server) generate(ctx context.Context, expected gitstate.State, cwd
 	cancel()
 	if checkErr != nil || current.Availability != gitstate.Ready || current.Fingerprint != expected.Fingerprint {
 		failure = "staged state changed before publication"
+		return
+	}
+	if decision := server.controlReply(expected.RepoID); decision != nil {
+		failure = decision.Status
 		return
 	}
 	record := Record{Fingerprint: expected.Fingerprint, Repository: expected.RepoID, Worktree: expected.WorktreeID, ContextFingerprint: expected.ContextFingerprint, Candidates: candidates, CreatedAt: time.Now().UTC(), Provider: generated.Metadata, Policy: repositoryPolicy, Grounding: reports, Activity: activityProvenance, Learning: learningExplanation, Cloud: cloudProvenance}
@@ -731,6 +756,9 @@ func (server *Server) lookup(request ipc.Request) ipc.Reply {
 	if len(request.Fingerprint) != 64 || len(request.Repository) != 64 || len(request.Worktree) != 64 {
 		return ipc.Reply{Version: ipc.Version, Status: "malformed", Error: "invalid fingerprint scope"}
 	}
+	if decision := server.controlReply(request.Repository); decision != nil {
+		return *decision
+	}
 	server.mu.Lock()
 	record, found := server.cache[request.Fingerprint]
 	expired := false
@@ -774,6 +802,20 @@ func (server *Server) lookup(request ipc.Request) ipc.Reply {
 		return ipc.Reply{Version: ipc.Version, Status: "error", Error: err.Error()}
 	}
 	return ipc.Reply{Version: ipc.Version, Status: "ready", Payload: payload}
+}
+
+func (server *Server) controlReply(repository string) *ipc.Reply {
+	if server.controlPath == "" {
+		return nil
+	}
+	decision, err := control.Check(server.controlPath, repository)
+	if err != nil {
+		return &ipc.Reply{Version: ipc.Version, Status: "controls_invalid", Error: err.Error()}
+	}
+	if decision.Status != "enabled" {
+		return &ipc.Reply{Version: ipc.Version, Status: decision.Status}
+	}
+	return nil
 }
 
 func matchesActivity(record Record, current activity.Provenance) bool {

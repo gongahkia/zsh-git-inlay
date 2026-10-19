@@ -60,6 +60,15 @@ func run(arguments []string) error {
 		return configCommand(arguments[1:])
 	case "undo":
 		return undoCommand(arguments[1:])
+	case "enable", "disable", "snooze":
+		return controlCommand(arguments[0], arguments[1:])
+	case "control":
+		if len(arguments) < 2 || arguments[1] != "status" {
+			return errors.New("usage: zsh-git-inlay control status [--repo] [--cwd directory] [--json]")
+		}
+		return controlCommand("status", arguments[2:])
+	case "feedback":
+		return feedbackCommand(arguments[1:])
 	case "fingerprint":
 		return fingerprint(arguments[1:])
 	case "context":
@@ -198,6 +207,9 @@ func observe(arguments []string) error {
 	if err := flags.Parse(arguments); err != nil {
 		return err
 	}
+	if decision, err := clientControl(""); err != nil || decision.Status != "enabled" {
+		return suggestStatus(*jsonOutput, decision.Status)
+	}
 	cwd, err := resolveCWD(*cwdFlag)
 	if err != nil {
 		return err
@@ -231,6 +243,9 @@ func suggest(arguments []string) error {
 	if _, supported := command.Parse(*buffer, len(*buffer)); !supported {
 		return suggestStatus(*jsonOutput, "unsupported_command")
 	}
+	if decision, err := clientControl(""); err != nil || decision.Status != "enabled" {
+		return suggestStatus(*jsonOutput, decision.Status)
+	}
 	cwd, err := resolveCWD(*cwdFlag)
 	if err != nil {
 		return suggestStatus(*jsonOutput, "outside_repository")
@@ -243,6 +258,9 @@ func suggest(arguments []string) error {
 			return suggestStatus(*jsonOutput, "error")
 		}
 		return suggestStatus(*jsonOutput, string(state.Availability))
+	}
+	if decision, err := clientControl(state.RepoID); err != nil || decision.Status != "enabled" {
+		return suggestStatus(*jsonOutput, decision.Status)
 	}
 	reply, err := call(ipc.Request{Version: ipc.Version, Operation: "lookup", Fingerprint: state.Fingerprint, Repository: state.RepoID, Worktree: state.WorktreeID}, 20*time.Millisecond)
 	if err != nil {

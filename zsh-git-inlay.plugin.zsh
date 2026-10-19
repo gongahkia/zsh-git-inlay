@@ -33,6 +33,7 @@ _zsh_git_inlay_maybe_commit() {
 
 _zsh_autosuggest_strategy_git-inlay() {
   emulate -L zsh
+  [[ ${ZSH_GIT_INLAY_DISABLED:-0} == 1 ]] && return 0
   _zsh_git_inlay_maybe_commit "$1" || return 0
   local -a arguments
   arguments=(suggest --cwd "$PWD" --buffer "$1" --cycle "${ZSH_GIT_INLAY_CYCLE:-0}")
@@ -68,6 +69,7 @@ _zsh_git_inlay_activity_emit() {
 
 _zsh_git_inlay_activity_preexec() {
   emulate -L zsh
+  [[ ${ZSH_GIT_INLAY_DISABLED:-0} == 1 ]] && return 0
   local class
   class="$(_zsh_git_inlay_activity_classify "$1")"
   [[ -n $class ]] || return 0
@@ -121,6 +123,10 @@ _zsh_git_inlay_activity_git_state() {
 
 _zsh_git_inlay_observe() {
   local exit_status=$?
+  if [[ ${ZSH_GIT_INLAY_DISABLED:-0} == 1 ]]; then
+    unset ZSH_GIT_INLAY_ACTIVITY_CLASS ZSH_GIT_INLAY_ACTIVITY_STARTED ZSH_GIT_INLAY_ACTIVITY_GIT_COMMIT ZSH_GIT_INLAY_LEARNING_COMMIT
+    return 0
+  fi
   _zsh_git_inlay_activity_finish "$exit_status"
   _zsh_git_inlay_activity_git_state
   _zsh_git_inlay_learning_commit
