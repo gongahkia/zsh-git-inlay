@@ -120,11 +120,20 @@ configuration precedence.
 
 ## Deterministic provider and parser
 
-The deterministic provider invokes `git diff --cached --name-status -z
---find-renames`, bounds metadata to 64 KiB, and creates three ordered,
-deterministic conventional-style messages. It deliberately ignores compiled
-source context and remains the test oracle. Ollama can instead receive the
-bounded context compiler output described in [CONTEXT.md](CONTEXT.md).
+The default deterministic provider combines bounded staged path/status metadata
+with the compiler's bounded redacted staged patch. It recognizes literal
+Go/JavaScript dependency-version changes and declaration-like added lines,
+then proposes named file operations and an overall summary. These textual
+heuristics do not establish semantic correctness; every proposal still passes
+normal grounding and repository policy. A truncated patch contributes no such
+textual facts. Alternatives are capped at three and are not padded with generic
+synonyms. Identifier and filename spelling is preserved in subjects.
+
+`deterministic-baseline` invokes the unchanged metadata-template generator:
+`git diff --cached --name-status -z --find-renames`, bounded to 64 KiB, with
+three ordered messages. This separate path-only control remains available for
+frozen comparisons. Ollama can receive the bounded context compiler output
+described in [CONTEXT.md](CONTEXT.md).
 
 The parser accepts only the stated canonical command forms, including `command git commit`, `-m`, `--message`, `-am`, flags before the message, repeated whitespace, and incomplete quote states. It rejects non-end cursors, `--amend`, `--fixup`, `--squash`, other Git commands, shell operators/substitutions, and completed message arguments. A candidate must extend the user prefix. Empty messages receive single quotes; open single or double quotes receive their matching closing quote; an unquoted typed prefix receives a shell-escaped continuation. Generated candidates are restricted to a conservative printable character set before this composition. When a typed prefix matches a later prepared candidate, selection reranks the existing matching subset in its original order; it has no daemon, context, generation, or questionnaire operation.
 

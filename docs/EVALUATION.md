@@ -6,11 +6,11 @@ the daemon's actual background context, provider, grounding, ranking, private
 cache-publication, and exact-lookup code with a temporary private cache. It
 does not open a Unix socket; a separate foreground-daemon rehearsal remains
 necessary to validate socket service behavior. The built-in corpus is public,
-synthetic, versioned as `v2`, and covers
+synthetic, versioned as `v3`, and covers
 feature work, bug fixes, refactors, tests, documentation, dependencies,
 renames, deletions, mixed and ambiguous changes, partial staging, misleading
 comments, shell-metacharacter filenames, untrusted issue-like identifiers, and
-staged prompt-like text. Eight development cases and seven held-out cases are
+staged prompt-like text. Eight development cases and nineteen held-out cases are
 separate so prompt iteration cannot be reported only on the cases used to
 motivate it.
 

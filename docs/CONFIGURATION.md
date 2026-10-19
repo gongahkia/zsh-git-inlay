@@ -18,10 +18,16 @@ max_bytes = 33554432               # 65536 through 1073741824
 max_age = "168h"                  # positive duration, at most 8760h
 
 [provider]
-name = "deterministic"            # deterministic, ollama, or openai
+name = "deterministic"            # deterministic, deterministic-baseline, ollama, or openai
 # model = "qwen2.5-coder:0.5b"    # required for ollama or openai
 timeout = "8s"                    # 1s through 1m
 fallback = "deterministic"        # deterministic or none; openai requires none
+
+[ollama]
+context_tokens = 4096            # 1024 through 32768
+output_tokens = 256              # 64 through 2048
+cold_timeout = "30s"             # 1s through 2m; caller deadlines still apply
+keep_alive = "5m"                # 0s through 30m
 
 [grounding]
 ambiguity = "conservative"        # conservative, quiet, visible, or hintable
@@ -32,6 +38,7 @@ max_events = 256                   # 1 through 4096 per repository/worktree
 
 [zsh]
 cycle_keybinding = "^Xg"
+cycle_keymaps = ["emacs", "viins"]
 
 [diagnostics]
 verbose = false

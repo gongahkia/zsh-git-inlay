@@ -2,7 +2,7 @@
 
 ## What the prototype proves
 
-The deterministic provider has three distinct ordered candidates per exact staged state. Preparation begins from the prompt boundary after a Git command returns, before `git commit -m ` is typed. A normal commit command only performs an exact index identity plus a bounded local cache lookup. No candidate is generated on that path.
+The original metadata baseline has three distinct ordered candidates per exact staged state. The current default provider prepares up to three factual alternatives without padding generic synonyms. Preparation begins from the prompt boundary after a Git command returns, before `git commit -m ` is typed. A normal commit command only performs an exact index identity plus a bounded local cache lookup. No candidate is generated on that path.
 
 The automated suite maps to the acceptance scenarios as follows:
 

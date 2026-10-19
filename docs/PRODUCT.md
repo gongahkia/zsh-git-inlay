@@ -10,7 +10,7 @@ setup, diagnostic, and test facilities only. `compose` is an explicit,
 secondary editor utility in the same product; it is not an interactive
 frontend or a commit executor. `evaluate` is an offline administrative harness,
 not an alternative commit-message workflow. The
-deterministic generator remains the default and test oracle. An explicitly
+staged-facts deterministic provider remains the default; the unchanged metadata-template provider is the comparison oracle. An explicitly
 selected existing local Ollama runtime can generate structured candidates from
 bounded staged-only context; mocked contracts and a live development evaluation
 exist, but the three tested Qwen candidates were rejected on this host and no
