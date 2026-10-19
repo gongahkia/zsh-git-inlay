@@ -3,6 +3,7 @@ package config
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -48,6 +49,16 @@ type Settings struct {
 	CycleKeybinding     string        `config:"zsh.cycle_keybinding"`
 	CycleKeymaps        []string      `config:"zsh.cycle_keymaps"`
 	Verbose             bool          `config:"diagnostics.verbose"`
+	MessageConvention   string        `config:"commit.convention"`
+	MessageTypes        []string      `config:"commit.types"`
+	MessageScopes       []string      `config:"commit.scopes"`
+	MessageScopePaths   []string      `config:"commit.scope_paths"`
+	MessageLineLength   int           `config:"commit.line_length"`
+	MessageCaps         string        `config:"commit.capitalization"`
+	MessageBody         string        `config:"commit.body"`
+	ScopeMode           string        `config:"commit.scope_mode"`
+	CandidateCount      int           `config:"suggestions.candidate_count"`
+	LearningEnabled     bool          `config:"learning.enabled"`
 	Version             string
 }
 
@@ -71,6 +82,16 @@ func Default() Settings {
 		ActivityMaxEvents:   256,
 		CycleKeybinding:     "^Xg",
 		CycleKeymaps:        []string{"emacs", "viins"},
+		MessageConvention:   "conventional",
+		MessageTypes:        []string{},
+		MessageScopes:       []string{},
+		MessageScopePaths:   []string{},
+		MessageLineLength:   120,
+		MessageCaps:         "lower",
+		MessageBody:         "optional",
+		ScopeMode:           "auto",
+		CandidateCount:      3,
+		LearningEnabled:     true,
 		Version:             "default",
 	}
 }
@@ -285,6 +306,27 @@ func Parse(content []byte, path string) (settings Settings, resultErr error) {
 			return Settings{}, fmt.Errorf("invalid config %s: diagnostics.verbose must be true or false", path)
 		}
 	}
+	if value, ok := values["suggestions.candidate_count"]; ok {
+		settings.CandidateCount, err = strconv.Atoi(value)
+		if err != nil || settings.CandidateCount < 1 || settings.CandidateCount > 3 {
+			return Settings{}, errors.New("suggestions.candidate_count must be 1..3")
+		}
+	}
+	if value, ok := values["learning.enabled"]; ok {
+		settings.LearningEnabled, err = strconv.ParseBool(value)
+		if err != nil {
+			return Settings{}, errors.New("learning.enabled must be true or false")
+		}
+	}
+	messagePolicy, err := applyRepositoryValues(values, path, DefaultRepositoryPolicy())
+	if err != nil {
+		return Settings{}, err
+	}
+	settings.MessageConvention, settings.MessageTypes, settings.MessageScopes = messagePolicy.Convention, messagePolicy.Types, messagePolicy.Scopes
+	if value, exists := values["commit.scope_paths"]; exists {
+		settings.MessageScopePaths, _ = policyArray(value, "commit.scope_paths")
+	}
+	settings.MessageLineLength, settings.MessageCaps, settings.MessageBody, settings.ScopeMode = messagePolicy.LineLength, messagePolicy.Capitalization, messagePolicy.Body, messagePolicy.ScopeMode
 	sum := sha256.Sum256(content)
 	settings.Version = fmt.Sprintf("%x", sum[:])
 	return settings, nil
@@ -307,16 +349,21 @@ type RepositoryPolicy struct {
 	LineLength     int         `json:"line_length"`
 	Capitalization string      `json:"capitalization"`
 	Body           string      `json:"body"`
+	ScopeMode      string      `json:"scope_mode,omitempty"`
 }
 
 func DefaultRepositoryPolicy() RepositoryPolicy {
-	return RepositoryPolicy{Source: "built-in", Version: "none", Convention: "conventional", LineLength: 120, Capitalization: "lower", Body: "optional"}
+	return RepositoryPolicy{Source: "built-in", Version: "none", Convention: "conventional", LineLength: 120, Capitalization: "lower", Body: "optional", ScopeMode: "auto"}
 }
 
 // LoadRepositoryPolicy accepts only message-policy settings. Repository TOML
 // cannot enable a provider or grant access to private data.
 func LoadRepositoryPolicy(root string) (RepositoryPolicy, error) {
-	policy := DefaultRepositoryPolicy()
+	settings, err := Load()
+	if err != nil {
+		return RepositoryPolicy{}, err
+	}
+	policy := settings.RepositoryDefaults()
 	path := filepath.Join(root, ".zsh-git-inlay.toml")
 	content, err := readContent(path)
 	if os.IsNotExist(err) {
@@ -325,7 +372,7 @@ func LoadRepositoryPolicy(root string) (RepositoryPolicy, error) {
 	if err != nil {
 		return RepositoryPolicy{}, fmt.Errorf("read repository config: %w", err)
 	}
-	return ParseRepository(content, path)
+	return parseRepository(content, path, policy)
 }
 
 func readContent(path string) ([]byte, error) {
@@ -349,12 +396,25 @@ func readContent(path string) ([]byte, error) {
 }
 
 func ParseRepository(content []byte, path string) (policy RepositoryPolicy, resultErr error) {
-	policy = DefaultRepositoryPolicy()
+	return parseRepository(content, path, DefaultRepositoryPolicy())
+}
+
+func parseRepository(content []byte, path string, policy RepositoryPolicy) (result RepositoryPolicy, resultErr error) {
 	defer func() { resultErr = withLocation(resultErr, content, path) }()
 	_, values, err := parse(string(content), allowedKeys(true))
 	if err != nil {
 		return RepositoryPolicy{}, fmt.Errorf("invalid repository config %s: %w", path, err)
 	}
+	result, resultErr = applyRepositoryValues(values, path, policy)
+	if resultErr != nil {
+		return result, resultErr
+	}
+	sum := sha256.Sum256(append([]byte(policy.Version+"\n"), content...))
+	result.Source, result.Version = path, fmt.Sprintf("%x", sum[:])
+	return result, nil
+}
+
+func applyRepositoryValues(values map[string]string, path string, policy RepositoryPolicy) (RepositoryPolicy, error) {
 	if value, ok := values["commit.convention"]; ok {
 		if !quoted(value) || unquote(value) != "conventional" {
 			return RepositoryPolicy{}, fmt.Errorf("invalid repository config %s: commit.convention must be conventional", path)
@@ -413,6 +473,11 @@ func ParseRepository(content []byte, path string) (policy RepositoryPolicy, resu
 		})
 		policy.ScopePaths = rules
 	}
+	for _, rule := range policy.ScopePaths {
+		if len(policy.Scopes) > 0 && !contains(policy.Scopes, rule.Scope) {
+			return RepositoryPolicy{}, fmt.Errorf("invalid repository config %s: commit.scopes must include each inherited commit.scope_paths scope", path)
+		}
+	}
 	if value, ok := values["commit.line_length"]; ok {
 		length, lengthErr := strconv.Atoi(value)
 		if lengthErr != nil || length < 16 || length > 160 {
@@ -432,9 +497,34 @@ func ParseRepository(content []byte, path string) (policy RepositoryPolicy, resu
 		}
 		policy.Body = unquote(value)
 	}
-	sum := sha256.Sum256(content)
-	policy.Source, policy.Version = path, fmt.Sprintf("%x", sum[:])
+	if value, ok := values["commit.scope_mode"]; ok {
+		if !quoted(value) || (unquote(value) != "auto" && unquote(value) != "none") {
+			return RepositoryPolicy{}, errors.New("commit.scope_mode must be auto or none")
+		}
+		policy.ScopeMode = unquote(value)
+	}
 	return policy, nil
+}
+
+// RepositoryDefaults layers user message preferences beneath repository policy.
+func (settings Settings) RepositoryDefaults() RepositoryPolicy {
+	policy := DefaultRepositoryPolicy()
+	policy.Convention, policy.Types, policy.Scopes = settings.MessageConvention, settings.MessageTypes, settings.MessageScopes
+	policy.LineLength, policy.Capitalization, policy.Body, policy.ScopeMode = settings.MessageLineLength, settings.MessageCaps, settings.MessageBody, settings.ScopeMode
+	for _, mapping := range settings.MessageScopePaths {
+		prefix, scope, _ := strings.Cut(mapping, "=")
+		policy.ScopePaths = append(policy.ScopePaths, ScopeRule{Path: strings.TrimSuffix(strings.TrimSpace(prefix), "/"), Scope: strings.TrimSpace(scope)})
+	}
+	sort.Slice(policy.ScopePaths, func(i, j int) bool {
+		if len(policy.ScopePaths[i].Path) == len(policy.ScopePaths[j].Path) {
+			return policy.ScopePaths[i].Path < policy.ScopePaths[j].Path
+		}
+		return len(policy.ScopePaths[i].Path) > len(policy.ScopePaths[j].Path)
+	})
+	if settings.Version != "default" {
+		policy.Source, policy.Version = configPath(), settings.Version
+	}
+	return policy
 }
 
 func RepositoryVersion(root string) (string, error) {

@@ -51,7 +51,7 @@ func TestTypedShowIncludesDefaultEffectiveAndOrigin(t *testing.T) {
 			}
 		}
 	}
-	if !found || len(entries) != 20 {
+	if !found || len(entries) != len(settingsEntries(Default())) {
 		t.Fatalf("schema missing settings: %d", len(entries))
 	}
 }

@@ -46,3 +46,9 @@ before declaring completion.
   installers, Homebrew preparation and the SBOM include its notice/dependency.
   Repair quarantines invalid settings as comments, keeps valid choices, and
   reports path/line/key; all writes validate first and print backup/undo paths.
+- Customization engine now layers user message preferences beneath repository
+  overrides, adapts sentence/lower capitalization, bounded path-to-scope rules,
+  scope omission and short factual subjects before grounding; count applies
+  after ranking. Global learning disable prevents collection and reuse. Relevant
+  configuration/provider/daemon/grounding/Git/CLI packages passed race tests.
+  Wizard exposure remains part of task 4.

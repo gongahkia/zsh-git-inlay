@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
 	"strings"
 	"time"
@@ -27,6 +28,7 @@ var repositoryDefaults = []Entry{
 	{Key: "commit.line_length", Type: "integer", Default: 120},
 	{Key: "commit.capitalization", Type: "string", Default: "lower"},
 	{Key: "commit.body", Type: "string", Default: "optional"},
+	{Key: "commit.scope_mode", Type: "string", Default: "auto"},
 }
 
 // Schema derives defaults from the same Settings used by the running daemon.
@@ -57,6 +59,9 @@ func settingsEntries(settings Settings) []Entry {
 				kind = "boolean"
 			case reflect.Slice:
 				kind = "string array"
+				if field.IsNil() {
+					effective = []string{}
+				}
 			}
 		}
 		entries = append(entries, Entry{Key: key, Type: kind, Default: effective, Effective: effective, Source: "built-in"})
@@ -74,7 +79,11 @@ func allowedKeys(repository bool) map[string]bool {
 
 func Validate(content []byte, path string, repository bool) error {
 	if repository {
-		_, err := ParseRepository(content, path)
+		settings, err := Load()
+		if err != nil {
+			return err
+		}
+		_, err = parseRepository(content, path, settings.RepositoryDefaults())
 		return err
 	}
 	_, err := Parse(content, path)
@@ -91,14 +100,30 @@ func Show(content []byte, path string, repository bool) ([]Entry, error) {
 	}
 	entries := Schema(repository)
 	var effective []Entry
-	if !repository {
+	globalEntries := map[string]Entry{}
+	if repository {
+		global, err := readContent(configPath())
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+		entries, err := Show(global, configPath(), false)
+		if err != nil {
+			return nil, err
+		}
+		for _, entry := range entries {
+			globalEntries[entry.Key] = entry
+		}
+	} else {
 		settings, _ := Parse(content, path)
 		effective = settingsEntries(settings)
 	}
 	for i := range entries {
 		entry := &entries[i]
 		entry.Source, entry.Effective = "built-in", entry.Default
-		if !repository {
+		if repository {
+			global := globalEntries[entry.Key]
+			entry.Source, entry.Effective, entry.Line = global.Source, global.Effective, global.Line
+		} else {
 			entry.Effective = effective[i].Effective
 		}
 		if field, exists := doc.fields[entry.Key]; exists {
@@ -184,6 +209,9 @@ func RepairDocument(content []byte, path string, repository bool) (Repair, error
 		var diagnostic *Diagnostic
 		if !errors.As(err, &diagnostic) {
 			return result, err
+		}
+		if diagnostic.Path != path {
+			return result, fmt.Errorf("repair prerequisite configuration first: %w", err)
 		}
 		result.Diagnostics = append(result.Diagnostics, *diagnostic)
 		doc, _ := parseDocument(result.Content, path, nil)

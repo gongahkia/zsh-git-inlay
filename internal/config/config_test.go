@@ -128,3 +128,24 @@ func TestOllamaBudgetValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestRepositoryOverridesOnlySpecifiedUserMessagePreferences(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	t.Setenv("ZSH_GIT_INLAY_CONFIG", path)
+	if err := os.WriteFile(path, []byte("[commit]\ncapitalization = 'sentence'\nline_length = 72\nscopes = ['api']\nscope_paths = ['internal/api=api']\nscope_mode = 'none'\n[suggestions]\ncandidate_count = 2\n[learning]\nenabled = false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	repository := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repository, ".zsh-git-inlay.toml"), []byte("[commit]\nline_length = 90\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	policy, err := LoadRepositoryPolicy(repository)
+	if err != nil || policy.LineLength != 90 || policy.Capitalization != "sentence" || policy.ScopeMode != "none" || len(policy.ScopePaths) != 1 || policy.ScopePaths[0].Scope != "api" {
+		t.Fatalf("incorrect message preference layering: %+v %v", policy, err)
+	}
+	for _, content := range []string{"[suggestions]\ncandidate_count = 0\n", "[commit]\ncapitalization = 'title'\n", "[learning]\nenabled = 1\n", "[commit]\nscope_mode = 'shell'\n"} {
+		if _, err := Parse([]byte(content), "prefs.toml"); err == nil {
+			t.Fatalf("invalid customization accepted: %s", content)
+		}
+	}
+}

@@ -94,6 +94,7 @@ type Server struct {
 	provider         provider.Provider
 	fallback         provider.Provider
 	providerVersion  string
+	preferences      config.Settings // protected by providerMu; runtime budgets stay fixed until restart
 	ambiguityPolicy  string
 	activity         *activity.Store
 	learner          *learning.Store
@@ -204,7 +205,7 @@ func newServerWithCloud(settings config.Settings, socket, cacheDir string, event
 	if err != nil {
 		selected = provider.Deterministic{}
 	}
-	return &Server{settings: settings, socket: socket, cacheDir: cacheDir, cache: map[string]Record{}, active: map[string]active{}, jobs: map[string]job{}, failures: map[string]string{}, sem: make(chan struct{}, settings.MaxGenerationJobs), lastUse: time.Now(), cacheStatus: CacheStatus{MaxEntries: settings.CacheMaxRecords, MaxBytes: settings.CacheMaxBytes}, provider: selected, fallback: provider.Fallback(settings), providerVersion: settings.Version, ambiguityPolicy: settings.GroundingPolicy, activity: events, learner: learner, cloud: grants, learningProfiles: map[string]learning.Profile{}, prepared: map[string]preparedLearning{}, stop: make(chan struct{})}
+	return &Server{settings: settings, socket: socket, cacheDir: cacheDir, cache: map[string]Record{}, active: map[string]active{}, jobs: map[string]job{}, failures: map[string]string{}, sem: make(chan struct{}, settings.MaxGenerationJobs), lastUse: time.Now(), cacheStatus: CacheStatus{MaxEntries: settings.CacheMaxRecords, MaxBytes: settings.CacheMaxBytes}, provider: selected, fallback: provider.Fallback(settings), providerVersion: settings.Version, preferences: settings, ambiguityPolicy: settings.GroundingPolicy, activity: events, learner: learner, cloud: grants, learningProfiles: map[string]learning.Profile{}, prepared: map[string]preparedLearning{}, stop: make(chan struct{})}
 }
 
 func activitySettings(settings config.Settings) activity.Settings {
@@ -471,6 +472,10 @@ func (server *Server) generate(ctx context.Context, expected gitstate.State, cwd
 		return
 	}
 	candidates, reports, learningExplanation := server.applyLearning(ctx, cwd, expected, candidates, reports)
+	preferences := server.preferencesSnapshot()
+	if len(candidates) > preferences.CandidateCount && preferences.CandidateCount > 0 {
+		candidates, reports = candidates[:preferences.CandidateCount], reports[:preferences.CandidateCount]
+	}
 	checkContext, cancel := gitstate.WithTimeout()
 	current, checkErr := gitstate.Snapshot(checkContext, cwd)
 	cancel()
@@ -496,6 +501,12 @@ func (server *Server) generate(ctx context.Context, expected gitstate.State, cwd
 }
 
 func rankCandidates(response provider.Response, compiled repoctx.Compiled, policy string, repositoryPolicy config.RepositoryPolicy) ([]candidate.Candidate, []grounding.Result, error) {
+	// Validate the original response before adapting its presentation. A
+	// preference must never sanitize an unsafe provider response into approval.
+	if _, err := response.ToCandidates(); err != nil {
+		return nil, nil, err
+	}
+	response = provider.AdaptPreferences(response, compiled.Evidence(), repositoryPolicy)
 	values, err := response.ToCandidates()
 	if err != nil {
 		return nil, nil, err
@@ -527,6 +538,9 @@ func rankCandidates(response provider.Response, compiled repoctx.Compiled, polic
 // unsafe candidates. It can therefore reorder valid candidates but cannot make
 // a profile authorize a type, scope, body, or unsupported claim.
 func (server *Server) applyLearning(ctx context.Context, cwd string, state gitstate.State, candidates []candidate.Candidate, reports []grounding.Result) ([]candidate.Candidate, []grounding.Result, learning.Explanation) {
+	if !server.learningEnabled() {
+		return candidates, reports, learning.Explanation{}
+	}
 	profile, found := server.learningProfile(state.RepoID)
 	if !found {
 		return candidates, reports, learning.Explanation{}
@@ -678,9 +692,26 @@ func (server *Server) refreshProvider() error {
 	server.providerMu.Lock()
 	if settings.Version != server.providerVersion {
 		server.provider, server.fallback, server.providerVersion, server.ambiguityPolicy = selected, provider.Fallback(settings), settings.Version, settings.GroundingPolicy
+		server.preferences = settings
 	}
 	server.providerMu.Unlock()
 	return nil
+}
+
+func (server *Server) preferencesSnapshot() config.Settings {
+	server.providerMu.RLock()
+	defer server.providerMu.RUnlock()
+	return server.preferences
+}
+
+func (server *Server) learningEnabled() bool {
+	if !server.preferencesSnapshot().LearningEnabled {
+		return false
+	}
+	// A missed observe hook must not keep collecting after the user switches
+	// learning off. A malformed new configuration also fails closed.
+	settings, err := config.Load()
+	return err == nil && settings.LearningEnabled
 }
 
 func (server *Server) finishWithError(fingerprint string, jobID uint64, failure string) {
@@ -750,6 +781,9 @@ func matchesActivity(record Record, current activity.Provenance) bool {
 }
 
 func (server *Server) matchesLearning(record Record) bool {
+	if !server.learningEnabled() {
+		return !record.Learning.Enabled
+	}
 	if server.learner == nil {
 		return true
 	}
@@ -820,7 +854,7 @@ func (server *Server) observeActivityGit(cwd string, commit bool) ipc.Reply {
 // daemon memory. A failed or aborted commit therefore cannot create a durable
 // learning signal, and generated messages are never written into profiles.
 func (server *Server) prepareLearning(cwd string) ipc.Reply {
-	if server.learner == nil {
+	if server.learner == nil || !server.learningEnabled() {
 		return ipc.Reply{Version: ipc.Version, Status: "ignored"}
 	}
 	state, reply := activityScope(cwd)
@@ -855,7 +889,7 @@ func (server *Server) prepareLearning(cwd string) ipc.Reply {
 }
 
 func (server *Server) commitLearning(cwd string) ipc.Reply {
-	if server.learner == nil {
+	if server.learner == nil || !server.learningEnabled() {
 		return ipc.Reply{Version: ipc.Version, Status: "ignored"}
 	}
 	state, reply := activityScope(cwd)

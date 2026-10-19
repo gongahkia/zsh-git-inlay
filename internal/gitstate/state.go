@@ -23,7 +23,7 @@ const (
 	// repository context.
 	ContextVersion   = "v2"
 	GroundingVersion = "v1"
-	PolicyVersion    = "v1"
+	PolicyVersion    = "v2-preferences"
 	GeneratorVersion = "v2-facts-provider-" + config.ProviderPromptVersion + "-context-" + ContextVersion + "-grounding-" + GroundingVersion + "-policy-" + PolicyVersion
 )
 
