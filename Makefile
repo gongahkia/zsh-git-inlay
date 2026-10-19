@@ -15,7 +15,7 @@ build:
 	mkdir -p $(BUILD_DIR)
 	$(GO) build $(BUILD_FLAGS) -o $(BINARY) ./cmd/zsh-git-inlay
 
-test: test-setup test-go test-zsh test-eval test-nvim test-install test-dogfood test-soak
+test: test-packaging test-setup test-go test-zsh test-eval test-nvim test-install test-dogfood test-soak
 
 test-go:
 	$(GO) test ./...
@@ -37,6 +37,9 @@ test-nvim:
 	else \
 		echo "skipping Neovim adapter test: nvim is unavailable"; \
 	fi
+
+test-packaging:
+	python3 -m unittest discover -s tests -p '*_test.py'
 
 test-setup: build
 	ZSH_GIT_INLAY_BIN=$(abspath $(BINARY)) zsh tests/setup.zsh
@@ -70,7 +73,7 @@ lint:
 	$(GO) vet ./...
 	test -z "$$($(GO)fmt -l $$(find cmd internal -name '*.go' -print))"
 	zsh -n tests/setup.zsh tests/shell-contract.zsh zsh-git-inlay.plugin.zsh tests/integration.zsh tests/reliability.zsh tests/evaluation.zsh tests/install.zsh tests/dogfood.zsh tests/soak.zsh tests/live-ollama.zsh
-	sh -n scripts/install.sh scripts/install-release.sh scripts/uninstall.sh scripts/checksums.sh scripts/sbom.sh scripts/release-snapshot.sh
+	sh -n scripts/install-binary.sh scripts/install.sh scripts/install-release.sh scripts/uninstall.sh scripts/checksums.sh scripts/sbom.sh scripts/release-snapshot.sh
 	! rg -n '\beval\b|function[[:space:]]+git\b' zsh-git-inlay.plugin.zsh cmd internal
 
 bench:

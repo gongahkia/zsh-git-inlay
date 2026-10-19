@@ -45,7 +45,8 @@ zsh-git-inlay.plugin.zsh
 README.md
 CHANGELOG.md'
 members=$(tar -tzf "$archive")
-[ "$members" = "$expected_members" ] || {
+[ "$members" = "$expected_members" ] || [ "$members" = "$expected_members
+LICENSE" ] || {
 	printf '%s\n' 'release archive has unexpected members' >&2
 	exit 1
 }

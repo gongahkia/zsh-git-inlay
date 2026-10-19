@@ -144,3 +144,25 @@ actual daemon/socket/lookup path in a disposable repository. The demo isolates
 config, cache, activity/learning data and runtime; it uses deterministic
 inference, never commits, and cleans up its daemon and files. `--json` supports
 automation. `doctor --check` includes the same shell integration check.
+
+## Preparing binary distribution
+
+`scripts/install-binary.sh --version vX.Y.Z --sha256 <reviewed-target-digest>`
+downloads only the explicit GitHub release archive for the current OS/CPU,
+checks the supplied SHA-256 before extraction/install, and supports `--prefix`.
+Use a digest obtained from reviewed release evidence. The script does not pipe
+remote code into a shell, select a floating version, or alter `.zshrc`.
+
+The manual `prepare release artifacts` workflow runs checks and uploads four
+archives plus a generated Homebrew formula for review; it has read-only
+repository permissions and cannot publish a release. It requires an explicit
+version, committed nonempty `LICENSE`, and the maintainer-selected SPDX ID.
+`python3 scripts/prepare-package.py --dist <snapshot> --version vX.Y.Z
+--license-id <SPDX-ID> --output <new-formula.rb>` verifies every archive hash
+and embedded license before generating platform/CPU-specific pinned URLs and
+checksums. Snapshots include LICENSE when selected. No license or release is
+selected by these tools; live Homebrew install/audit awaits published artifacts.
+
+Packaging tests use Python 3's standard library and mock downloads; ordinary
+runtime does not require Python. Homebrew formula syntax follows its
+[Formula Cookbook](https://docs.brew.sh/Formula-Cookbook).

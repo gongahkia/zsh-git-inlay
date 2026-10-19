@@ -69,8 +69,15 @@ for target in $targets; do
 	chmod 755 "$stage/zsh-git-inlay"
 	chmod 644 "$stage/zsh-git-inlay.plugin.zsh" "$stage/README.md" "$stage/CHANGELOG.md"
 	touch -t 200001010000 "$stage/zsh-git-inlay" "$stage/zsh-git-inlay.plugin.zsh" "$stage/README.md" "$stage/CHANGELOG.md"
+    members='zsh-git-inlay zsh-git-inlay.plugin.zsh README.md CHANGELOG.md'
+    if [ -f "$source_dir/LICENSE" ]; then
+        cp "$source_dir/LICENSE" "$stage/LICENSE"
+        chmod 644 "$stage/LICENSE"
+        touch -t 200001010000 "$stage/LICENSE"
+        members="$members LICENSE"
+    fi
 	archive="$output/zsh-git-inlay_${version}_${target}.tar.gz"
-	tar -C "$stage" -czf "$archive" zsh-git-inlay zsh-git-inlay.plugin.zsh README.md CHANGELOG.md
+	tar -C "$stage" -czf "$archive" $members
 	chmod 644 "$archive"
 	rm -rf -- "$stage"
 	cleanup_stage=

@@ -1,0 +1,42 @@
+name: prepare release artifacts
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Explicit vMAJOR.MINOR.PATCH version
+        required: true
+        type: string
+      license_id:
+        description: Maintainer-selected SPDX identifier matching committed LICENSE
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_LICENSE: ${{ inputs.license_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: '1.26.7'
+      - name: require committed license and validate version
+        run: |
+          test -s LICENSE
+          git ls-files --error-unmatch LICENSE
+          python3 -c 'import os,re; assert re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?", os.environ["RELEASE_VERSION"])'
+      - run: sudo apt-get update && sudo apt-get install --yes zsh zsh-autosuggestions
+      - run: make test lint && go test -race ./...
+      - name: build reviewed artifacts and formula
+        run: |
+          make release-snapshot VERSION="$RELEASE_VERSION" DIST=dist/prepared
+          python3 scripts/prepare-package.py --dist dist/prepared --version "$RELEASE_VERSION" --license-id "$RELEASE_LICENSE" --output dist/prepared/zsh-git-inlay.rb
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: prepared-release
+          path: dist/prepared
+          if-no-files-found: error
+          retention-days: 7
