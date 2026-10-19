@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -147,5 +148,23 @@ func TestRepositoryOverridesOnlySpecifiedUserMessagePreferences(t *testing.T) {
 		if _, err := Parse([]byte(content), "prefs.toml"); err == nil {
 			t.Fatalf("invalid customization accepted: %s", content)
 		}
+	}
+}
+
+func TestLoadRejectsNamedPipeWithoutHanging(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := syscall.Mkfifo(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ZSH_GIT_INLAY_CONFIG", path)
+	done := make(chan error, 1)
+	go func() { _, err := Load(); done <- err }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("pipe config accepted")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("config load blocked on a named pipe")
 	}
 }

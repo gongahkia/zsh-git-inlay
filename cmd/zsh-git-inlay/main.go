@@ -27,10 +27,8 @@ import (
 	"github.com/gongahkia/zsh-git-inlay/internal/ipc"
 	"github.com/gongahkia/zsh-git-inlay/internal/learning"
 	"github.com/gongahkia/zsh-git-inlay/internal/managed"
-	"github.com/gongahkia/zsh-git-inlay/internal/provider"
 	"github.com/gongahkia/zsh-git-inlay/internal/repoctx"
 	runtimepath "github.com/gongahkia/zsh-git-inlay/internal/runtime"
-	"github.com/gongahkia/zsh-git-inlay/internal/setup"
 )
 
 var (
@@ -1309,80 +1307,7 @@ func daemonCommand(arguments []string) error {
 	}
 }
 
-func doctor(arguments []string) error {
-	flags, _, jsonOutput := commonFlags("doctor")
-	check := flags.Bool("check", false, "verify the installed shell integration")
-	if err := flags.Parse(arguments); err != nil {
-		return err
-	}
-	binary, _ := os.Executable()
-	installation := setup.Discover(binary)
-	autosuggestions := installation.Autosuggestions != ""
-	_, zshErr := exec.LookPath("zsh")
-	_, gitErr := exec.LookPath("git")
-	settings, settingsErr := config.Load()
-	installation.ConfigValid = settingsErr == nil
-	if settingsErr != nil {
-		installation.Problem = settingsErr.Error()
-	}
-	var checkErr error
-	if *check {
-		checkErr = setup.Check(context.Background(), installation)
-		installation.CheckPassed = checkErr == nil
-		if checkErr != nil {
-			installation.Problem = errors.Join(settingsErr, checkErr).Error()
-		}
-	}
-	ollamaReport := map[string]any{"reachable": false, "models": []string{}}
-	if ollama, err := provider.NewOllama(provider.DefaultOllamaURL, "diagnostic", 250*time.Millisecond); err == nil {
-		if models, modelsErr := ollama.Models(context.Background()); modelsErr == nil {
-			names := make([]string, 0, len(models))
-			for _, model := range models {
-				names = append(names, model.Name)
-			}
-			ollamaReport["reachable"], ollamaReport["models"] = true, names
-		}
-	}
-	if settingsErr == nil && settings.Provider == "ollama" {
-		ollamaReport["configured_model"] = settings.ProviderModel
-		if ollamaReport["reachable"] == true {
-			if ollama, err := provider.NewOllama(provider.DefaultOllamaURL, settings.ProviderModel, 250*time.Millisecond); err == nil {
-				if model, showErr := ollama.Show(context.Background()); showErr == nil {
-					ollamaReport["configured_model_details"] = model.Details
-				}
-			}
-		}
-	}
-	managedReport := map[string]any{"available": false}
-	if dataDir, dataErr := runtimepath.DataDir(); dataErr == nil {
-		if manager, managerErr := managed.New(dataDir); managerErr == nil {
-			if managedStatus, statusErr := manager.Status(); statusErr == nil {
-				managedReport["available"], managedReport["status"] = true, managedStatus
-			}
-		}
-	}
-	socket, socketErr := runtimepath.SocketPath()
-	state := "unavailable"
-	if socketErr == nil {
-		if _, err := call(ipc.Request{Version: ipc.Version, Operation: "status"}, 30*time.Millisecond); err == nil {
-			state = "running"
-		}
-	}
-	report := map[string]any{"zsh": zshErr == nil, "git": gitErr == nil, "zsh_autosuggestions_file": autosuggestions, "daemon": state, "runtime_socket": socket, "go": runtime.Version(), "installation": installation, "ollama": ollamaReport, "managed_model": managedReport}
-	if *jsonOutput {
-		if err := printJSON(report); err != nil {
-			return err
-		}
-		return errors.Join(settingsErr, checkErr)
-	}
-	for _, key := range []string{"zsh", "git", "zsh_autosuggestions_file", "daemon", "runtime_socket", "ollama", "managed_model", "installation", "go"} {
-		fmt.Printf("%s: %v\n", key, report[key])
-	}
-	if !autosuggestions {
-		fmt.Fprintln(os.Stdout, "action: install and source zsh-autosuggestions before zsh-git-inlay.plugin.zsh")
-	}
-	return errors.Join(settingsErr, checkErr)
-}
+func doctor(arguments []string) error { return doctorCommand(arguments) }
 
 func ensureDaemon(cwd string) error {
 	executable, err := os.Executable()
@@ -1409,6 +1334,10 @@ func call(request ipc.Request, timeout time.Duration) (ipc.Reply, error) {
 	if err != nil {
 		return ipc.Reply{}, err
 	}
+	return callSocket(socket, request, timeout)
+}
+
+func callSocket(socket string, request ipc.Request, timeout time.Duration) (ipc.Reply, error) {
 	connection, err := net.DialTimeout("unix", socket, timeout)
 	if err != nil {
 		return ipc.Reply{}, err

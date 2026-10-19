@@ -38,6 +38,11 @@ func uninstallCommand(arguments []string) error {
 	if manifestErr != nil && !os.IsNotExist(manifestErr) {
 		return manifestErr
 	}
+	if manifestErr == nil {
+		if problems := manager.ArtifactProblems(manifest); len(problems) > 0 {
+			return fmt.Errorf("preserve modified installation; run doctor --fix before removal: %w", errors.Join(problems...))
+		}
+	}
 	recovery := ""
 	if manifestErr == nil && !*purge {
 		recovery, err = prepareRecoveryHelper(manager.History.Dir)
@@ -109,14 +114,14 @@ func prepareRecoveryHelper(historyDir string) (string, error) {
 		if discovered.Plugin == "" {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(filepath.Dir(discovered.Plugin), name))
-		if os.IsNotExist(err) {
+		snapshot, err := edit.Read(filepath.Join(filepath.Dir(discovered.Plugin), name))
+		if err == nil && !snapshot.Exists {
 			continue
 		}
 		if err != nil {
 			return "", err
 		}
-		if err := edit.UpdatePrivate(filepath.Join(filepath.Dir(path), name), func([]byte) ([]byte, error) { return data, nil }); err != nil {
+		if err := edit.UpdatePrivate(filepath.Join(filepath.Dir(path), name), func([]byte) ([]byte, error) { return snapshot.Data, nil }); err != nil {
 			return "", err
 		}
 	}

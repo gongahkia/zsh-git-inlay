@@ -11,7 +11,7 @@ the maintainer's actual shell, choose a license, publish, or download models.
   ZDOTDIR support, backups, idempotence, symlink preservation, safe undo,
   retained preferences by default and explicit purge. Verify interrupted work,
   changed files, repeat operations and actual interactive-shell activation.
-- [ ] 2. Doctor: meaningful pass/warning/failure checks and exit status, exact
+- [x] 2. Doctor: meaningful pass/warning/failure checks and exit status, exact
   causes/actions, shell activation/order/keymaps/async mode, component versions
   and stale sockets; conservative repair with backups and undo.
 - [x] 3. Typed config show/validate/set/reset/repair: effective/default/source
@@ -86,3 +86,16 @@ before declaring completion.
   journal backups and preserves unmarked shell text; it does not bless a
   corrupted installed plugin as its own repair source. Undo retains that
   original broken state for inspection or rollback.
+- Doctor now emits pass/warning/failure checks, exact actions and a failure exit
+  for unresolved required checks; --check verifies real normal/login shells,
+  active keymaps/conflicts, async mode, component consistency and source paths.
+  --fix recovers interrupted writes, selectively repairs user/repo preferences,
+  restores verified owned artifacts/blocks, repairs corrupt controls to disabled
+  and restarts an older daemon. Durable changes include backup/undo records;
+  ambiguous/unowned changes remain explicit failures.
+- Read-only doctor/history inspection creates no runtime directories or lock
+  files. Named pipes cannot hang config/source inspection. Private socket mode
+  is correct at bind; shutdown cancels/drains jobs and requests before returning.
+  Unit environments isolate HOME/XDG, credentials and Git configuration. A real
+  test process is killed after its first write and recovery restores the entire
+  transaction. Relevant package race tests and repeated shutdown tests pass.

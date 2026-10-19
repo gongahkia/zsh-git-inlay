@@ -51,3 +51,27 @@ func TestPrivateDirectoryRejectsSymlinkBeforeChangingPermissions(t *testing.T) {
 		t.Fatalf("rejection changed symlink target permissions: %v", err)
 	}
 }
+
+func TestRuntimeInspectionUsesTheSameFallbackWithoutCreatingIt(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ZSH_GIT_INLAY_RUNTIME_DIR", "")
+	t.Setenv("XDG_RUNTIME_DIR", filepath.Join(dir, "xdg"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(dir, "cache"))
+	if err := os.Mkdir(filepath.Join(dir, "xdg"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "xdg/zsh-git-inlay"), []byte("unrelated file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path, err := RuntimePath()
+	if err != nil || path != filepath.Join(dir, "cache/zsh-git-inlay/runtime") {
+		t.Fatalf("inspection did not choose fallback: %q %v", path, err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("inspection created fallback directory")
+	}
+	actual, err := Dir()
+	if err != nil || actual != path {
+		t.Fatalf("daemon disagrees with inspection: %q %v", actual, err)
+	}
+}

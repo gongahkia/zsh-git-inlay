@@ -158,7 +158,7 @@ func undoCommand(arguments []string) error {
 		return err
 	}
 	if arguments[0] == "list" {
-		journals, err := store.List()
+		journals, err := store.Inspect()
 		if err != nil {
 			return err
 		}

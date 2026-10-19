@@ -3,10 +3,13 @@ package edit
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func read(t *testing.T, path string) Snapshot {
@@ -194,5 +197,102 @@ func TestInterruptedMergedUndoRecoversWithoutLosingLaterEdits(t *testing.T) {
 	}
 	if _, err := store.Undo(journal.ID); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestInspectReadsMetadataWithoutCreatingOrDecodingBackups(t *testing.T) {
+	dir := t.TempDir()
+	store := Store{Dir: filepath.Join(dir, "history")}
+	if headers, err := store.Inspect(); err != nil || len(headers) != 0 {
+		t.Fatalf("empty history: %v", err)
+	}
+	if _, err := os.Stat(store.Dir); !os.IsNotExist(err) {
+		t.Fatal("inspection created the history directory")
+	}
+	path := filepath.Join(dir, "data")
+	journal, err := store.Apply("large backup", []Change{{Before: read(t, path), Data: []byte(strings.Repeat("private bytes", 10000))}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	headers, err := store.Inspect()
+	if err != nil || len(headers) != 1 || headers[0].ID != journal.ID || headers[0].State != "committed" {
+		t.Fatalf("bounded metadata inspection: %+v %v", headers, err)
+	}
+}
+
+func TestRealProcessDeathRecoversPreparedMultiFileTransaction(t *testing.T) {
+	if os.Getenv("ZGI_EDIT_CRASH_HELPER") == "1" {
+		dir := os.Getenv("ZGI_EDIT_CRASH_DIRECTORY")
+		store := Store{Dir: filepath.Join(dir, "history"), afterWrite: func(index int) error {
+			if index == 0 {
+				if err := os.WriteFile(filepath.Join(dir, "written"), []byte("ready"), 0o600); err != nil {
+					return err
+				}
+				for {
+					time.Sleep(time.Second)
+				}
+			}
+			return nil
+		}}
+		first, err := Read(filepath.Join(dir, "first"))
+		if err != nil {
+			os.Exit(2)
+		}
+		second, err := Read(filepath.Join(dir, "second"))
+		if err != nil {
+			os.Exit(2)
+		}
+		_, _ = store.Apply("crash rehearsal", []Change{{Before: first, Data: []byte("new")}, {Before: second, Data: []byte("created")}})
+		os.Exit(3)
+	}
+	dir := t.TempDir()
+	write(t, filepath.Join(dir, "first"), "original")
+	command := exec.Command(os.Args[0], "-test.run=^TestRealProcessDeathRecoversPreparedMultiFileTransaction$")
+	command.Env = append(os.Environ(), "ZGI_EDIT_CRASH_HELPER=1", "ZGI_EDIT_CRASH_DIRECTORY="+dir)
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = command.Process.Kill(); _ = command.Wait() }()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "written")); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("crash helper did not publish its first file")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := command.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	_ = command.Wait()
+	store := Store{Dir: filepath.Join(dir, "history")}
+	headers, err := store.Inspect()
+	if err != nil || len(headers) != 1 || headers[0].State != "prepared" {
+		t.Fatalf("process death did not leave a recoverable intent: %+v %v", headers, err)
+	}
+	if err := store.Recover(); err != nil {
+		t.Fatal(err)
+	}
+	if string(read(t, filepath.Join(dir, "first")).Data) != "original" || read(t, filepath.Join(dir, "second")).Exists {
+		t.Fatal("process crash left a partial transaction")
+	}
+}
+
+func TestReadRejectsPipeWithoutWaitingForAWriter(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config-pipe")
+	if err := syscall.Mkfifo(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { _, err := Read(path); done <- err }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("named pipe was accepted as a regular file")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("reader blocked waiting for a pipe writer")
 	}
 }

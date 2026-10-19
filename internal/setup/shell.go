@@ -90,6 +90,7 @@ type ShellReport struct {
 	Strategies       []string          `json:"strategies"`
 	Async            bool              `json:"async"`
 	CycleBinding     string            `json:"cycle_binding"`
+	CycleKeymaps     []string          `json:"cycle_keymaps"`
 	Bindings         map[string]string `json:"bindings"`
 	PreviousBindings map[string]string `json:"previous_bindings"`
 	Stderr           string            `json:"startup_diagnostics,omitempty"`
@@ -103,7 +104,7 @@ zmodload zsh/parameter
 builtin print -rn -- $'\0ZGI_PROBE\0'
 builtin print -rn -- "${_ZSH_GIT_INLAY_LOADED:-0}"$'\0'"${+functions[_zsh_autosuggest_fetch_suggestion]}"$'\0'"${ZSH_GIT_INLAY_PLUGIN_CONTRACT:-unknown}"$'\0'
 builtin print -rn -- "${functions_source[_zsh_autosuggest_strategy_git-inlay]:-}"$'\0'"${functions_source[_zsh_autosuggest_fetch_suggestion]:-}"$'\0'
-builtin print -rn -- "${commands[zsh-git-inlay]:-}"$'\0'"${(j:,:)ZSH_AUTOSUGGEST_STRATEGY}"$'\0'"${+ZSH_AUTOSUGGEST_USE_ASYNC}"$'\0'"${ZSH_GIT_INLAY_CYCLE_KEYBINDING:-}"$'\0'
+builtin print -rn -- "${commands[zsh-git-inlay]:-}"$'\0'"${(j:,:)ZSH_AUTOSUGGEST_STRATEGY}"$'\0'"${+ZSH_AUTOSUGGEST_USE_ASYNC}"$'\0'"${ZSH_GIT_INLAY_CYCLE_KEYBINDING:-}"$'\0'"${(j:,:)ZSH_GIT_INLAY_CYCLE_KEYMAPS}"$'\0'
 for zgi_map in emacs viins vicmd; do
   builtin print -rn -- "$zgi_map"$'\0'"$(bindkey -M "$zgi_map" "${ZSH_GIT_INLAY_CYCLE_KEYBINDING:-^Xg}" 2>/dev/null)"$'\0'"${_ZSH_GIT_INLAY_CYCLE_ORIGINAL_WIDGETS[$zgi_map]:-}"$'\0'
 done
@@ -120,7 +121,7 @@ builtin print -rn -- $'ZGI_END\0'`
 			continue
 		}
 		data := fields[index+1:]
-		if len(data) < 19 || string(data[18]) != "ZGI_END" {
+		if len(data) < 20 || string(data[19]) != "ZGI_END" {
 			break
 		}
 		result.Loaded, result.DependencyLoaded = string(data[0]) == "1", string(data[1]) == "1"
@@ -129,7 +130,10 @@ builtin print -rn -- $'ZGI_END\0'`
 			result.Strategies = strings.Split(string(data[6]), ",")
 		}
 		result.Async, result.CycleBinding = string(data[7]) == "1", string(data[8])
-		for offset := 9; offset < 18; offset += 3 {
+		if len(data[9]) > 0 {
+			result.CycleKeymaps = strings.Split(string(data[9]), ",")
+		}
+		for offset := 10; offset < 19; offset += 3 {
 			result.Bindings[string(data[offset])] = string(data[offset+1])
 			result.PreviousBindings[string(data[offset])] = string(data[offset+2])
 		}

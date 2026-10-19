@@ -98,7 +98,7 @@ func Read(path string) (Snapshot, error) {
 		return Snapshot{}, err
 	}
 	snapshot := Snapshot{Path: absolute, Target: target, Mode: 0o600}
-	file, err := os.Open(target)
+	file, err := os.OpenFile(target, os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, 0)
 	if os.IsNotExist(err) {
 		return snapshot, nil
 	}

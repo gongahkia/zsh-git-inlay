@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -24,7 +25,7 @@ type Installation struct {
 }
 
 func readable(path string) bool {
-	file, err := os.Open(path)
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return false
 	}
@@ -39,7 +40,14 @@ func Discover(binary string) Installation {
 	result.Git = err == nil
 	_, err = exec.LookPath("zsh")
 	result.Zsh = err == nil
-	for _, candidate := range []string{os.Getenv("ZSH_AUTOSUGGESTIONS_SOURCE"), "/opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh", "/usr/local/share/zsh-autosuggestions/zsh-autosuggestions.zsh", "/usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh"} {
+	candidates := []string{"/opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh", "/usr/local/share/zsh-autosuggestions/zsh-autosuggestions.zsh", "/usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh"}
+	if override := os.Getenv("ZSH_AUTOSUGGESTIONS_SOURCE"); override != "" {
+		candidates = []string{override}
+		if !readable(override) {
+			result.Problem = "ZSH_AUTOSUGGESTIONS_SOURCE is not a readable regular file: " + override
+		}
+	}
+	for _, candidate := range candidates {
 		if candidate != "" && readable(candidate) {
 			result.Autosuggestions = candidate
 			break
@@ -75,9 +83,8 @@ source "$3"
 [[ ${ZSH_AUTOSUGGEST_STRATEGY[1]} == git-inlay ]]
 command "$1" version --json >/dev/null
 zsh_git_inlay_unload`
-	cmd := exec.CommandContext(ctx, "zsh", "-dfc", script, "zsh", installation.Binary, installation.Autosuggestions, installation.Plugin)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("installation check failed: %s: %w", strings.TrimSpace(string(output)), err)
+	if output, diagnostics, err := runShell(ctx, nil, "-dfc", script, "zsh", installation.Binary, installation.Autosuggestions, installation.Plugin); err != nil {
+		return fmt.Errorf("installation check failed: %s %s: %w", strings.TrimSpace(string(output)), diagnostics, err)
 	}
 	return nil
 }

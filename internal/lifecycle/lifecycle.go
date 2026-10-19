@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gongahkia/zsh-git-inlay/internal/config"
@@ -309,7 +310,7 @@ func rejectArtifactLink(path string) error {
 }
 
 func readSource(path string) ([]byte, error) {
-	file, err := os.Open(path)
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}
