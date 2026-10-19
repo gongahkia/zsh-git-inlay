@@ -51,16 +51,21 @@ func factualCandidates(evidence []repoctx.Evidence, patch string, baseline []Can
 	}
 	if len(evidence) > 1 {
 		value := baseline[0]
-		value.EvidenceIDs = nil
+		names := []string{}
 		for _, item := range evidence {
-			if len(value.EvidenceIDs) < 8 {
-				value.EvidenceIDs = append(value.EvidenceIDs, item.ID)
+			if len(names) < 2 {
+				names = append(names, path.Base(item.Path))
 			}
 		}
+		subject := value.Subject + " including " + strings.Join(names, " and ")
+		if len(subject)+len(value.Scope)+len(value.Type)+5 <= 120 {
+			value.Subject = subject
+		}
+		value.EvidenceIDs = []string{"metadata:staged"}
 		add(value)
 	}
 	for _, item := range evidence {
-		name := strings.ToLower(path.Base(item.Path))
+		name := path.Base(item.Path)
 		if len(name) > 60 {
 			continue
 		}
@@ -81,9 +86,8 @@ func factualCandidates(evidence []repoctx.Evidence, patch string, baseline []Can
 		}
 		add(Candidate{Type: kind, Scope: factScope(item.Path), Subject: verb + " " + name, EvidenceIDs: []string{item.ID}})
 	}
-	for _, value := range baseline {
-		add(value)
-	}
+	// One overall summary is useful; padding with generic synonyms is not.
+	add(baseline[0])
 	if len(result) > candidate.MaxCandidates {
 		result = result[:candidate.MaxCandidates]
 	}
@@ -114,7 +118,7 @@ func patchFacts(patch string, evidence []repoctx.Evidence) []Candidate {
 		sort.Strings(names)
 		for _, name := range names {
 			if old, ok := removed[name]; ok && old != added[name] {
-				result = append(result, Candidate{Type: "build", Subject: fmt.Sprintf("update %s from %s to %s", name, old, added[name]), EvidenceIDs: []string{item.ID}})
+				result = append(result, Candidate{Type: "build", Subject: fmt.Sprintf("update %s from %s to %s in %s", name, old, added[name], path.Base(item.Path)), EvidenceIDs: []string{item.ID}})
 			}
 		}
 		names = nil
@@ -124,7 +128,7 @@ func patchFacts(patch string, evidence []repoctx.Evidence) []Candidate {
 		sort.Strings(names)
 		for _, name := range names {
 			if !removedDecl[name] {
-				result = append(result, Candidate{Type: "chore", Subject: "add " + strings.ToLower(name) + " declaration", EvidenceIDs: []string{item.ID}})
+				result = append(result, Candidate{Type: "chore", Subject: "add " + name + " declaration in " + path.Base(item.Path), EvidenceIDs: []string{item.ID}})
 			}
 		}
 	}
@@ -135,6 +139,9 @@ func patchFacts(patch string, evidence []repoctx.Evidence) []Candidate {
 			dependencySection = false
 			added, removed = map[string]string{}, map[string]string{}
 			addedDecl, removedDecl = map[string]bool{}, map[string]bool{}
+		}
+		if strings.HasPrefix(line, "@@ ") {
+			dependencySection = false
 		}
 		if strings.HasPrefix(line, "+++ b/") {
 			current = strings.TrimPrefix(line, "+++ b/")
