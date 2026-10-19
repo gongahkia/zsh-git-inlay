@@ -122,7 +122,8 @@ func versionCommand(arguments []string) error {
 	if err := flags.Parse(arguments); err != nil || flags.NArg() != 0 {
 		return errors.New("usage: zsh-git-inlay version [--json]")
 	}
-	report := map[string]string{"version": version, "commit": commit, "go": runtime.Version()}
+	build := daemon.CurrentBuild(version, commit)
+	report := map[string]string{"version": version, "commit": commit, "go": runtime.Version(), "protocol": fmt.Sprint(build.Protocol), "plugin_contract": build.PluginContract, "executable": build.Executable, "sha256": build.SHA256}
 	if *jsonOutput {
 		return printJSON(report)
 	}
@@ -1296,7 +1297,7 @@ func daemonCommand(arguments []string) error {
 		if err != nil {
 			return err
 		}
-		return daemon.Serve(context.Background(), settings, *initial)
+		return daemon.Serve(context.Background(), settings, *initial, daemon.CurrentBuild(version, commit))
 	case "stop":
 		_, err := call(ipc.Request{Version: ipc.Version, Operation: "stop"}, 100*time.Millisecond)
 		if err != nil {

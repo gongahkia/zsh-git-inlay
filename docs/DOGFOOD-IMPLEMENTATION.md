@@ -80,3 +80,9 @@ before declaring completion.
   Isolated CLI tests cover cancellation, reviewed customization, invalid
   provider batches, idempotent setup, removal, undo, and purge. Race checks pass.
   Full real-shell lifecycle rehearsal and enhanced doctor remain outstanding.
+- Daemon status now captures version/commit/protocol/plugin contract and the
+  executable digest once at startup, so an older process can be identified
+  after an upgrade. Recorded repair restores manifest-matching bytes from
+  journal backups and preserves unmarked shell text; it does not bless a
+  corrupted installed plugin as its own repair source. Undo retains that
+  original broken state for inspection or rollback.

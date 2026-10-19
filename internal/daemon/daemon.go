@@ -54,6 +54,7 @@ type CloudProvenance struct {
 }
 
 type Status struct {
+	Build       Build       `json:"build"`
 	Socket      string      `json:"socket"`
 	Ready       int         `json:"ready"`
 	Pending     int         `json:"pending"`
@@ -80,6 +81,7 @@ type Server struct {
 	socket      string
 	cacheDir    string
 	controlPath string // empty only in explicitly isolated evaluation/test servers
+	build       Build
 
 	mu               sync.Mutex
 	cacheMu          sync.Mutex
@@ -214,7 +216,7 @@ func activitySettings(settings config.Settings) activity.Settings {
 	return activity.Settings{Retention: settings.ActivityRetention, MaxEvents: settings.ActivityMaxEvents, MaxScopes: settings.MaxRepositories}
 }
 
-func Serve(ctx context.Context, settings config.Settings, initialCWD string) error {
+func Serve(ctx context.Context, settings config.Settings, initialCWD string, build ...Build) error {
 	socket, err := runtime.SocketPath()
 	if err != nil {
 		return err
@@ -258,6 +260,11 @@ func Serve(ctx context.Context, settings config.Settings, initialCWD string) err
 		grants, _ = cloud.New(dataDir)
 	}
 	server := newServerWithCloud(settings, socket, cacheDir, events, learner, grants)
+	if len(build) > 0 {
+		server.build = build[0]
+	} else {
+		server.build = CurrentBuild("dev", "unknown")
+	}
 	server.controlPath, err = control.Path()
 	if err != nil {
 		listener.Close()
@@ -1121,7 +1128,7 @@ func (server *Server) status() ipc.Reply {
 	cacheStatus := server.cacheStatus
 	server.cacheMu.Unlock()
 	server.mu.Lock()
-	status := Status{Socket: server.socket, Ready: len(server.cache), Pending: len(server.jobs), Active: len(server.active), IdleAfter: server.settings.IdleTimeout.String(), LastObserve: server.lastObserve, Cache: cacheStatus}
+	status := Status{Build: server.build, Socket: server.socket, Ready: len(server.cache), Pending: len(server.jobs), Active: len(server.active), IdleAfter: server.settings.IdleTimeout.String(), LastObserve: server.lastObserve, Cache: cacheStatus}
 	server.mu.Unlock()
 	payload, _ := json.Marshal(status)
 	return ipc.Reply{Version: ipc.Version, Status: "ready", Payload: payload}

@@ -117,3 +117,21 @@ func TestInvalidProviderBatchLeavesInstallationUntouched(t *testing.T) {
 		t.Fatal("invalid provider selection partly installed")
 	}
 }
+
+func TestSetupRepairUsesVerifiedBackupInsteadOfTheBrokenInstalledPlugin(t *testing.T) {
+	dir, args := adminFixture(t)
+	if _, err := captureCommandOutput(func() error { return run(args) }); err != nil {
+		t.Fatal(err)
+	}
+	plugin := filepath.Join(dir, "prefix with spaces/share/zsh-git-inlay/zsh-git-inlay.plugin.zsh")
+	if err := os.WriteFile(plugin, []byte("# user-broken plugin\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := captureCommandOutput(func() error { return run([]string{"setup", "repair", "--skip-shell-check", "--json"}) }); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(plugin)
+	if err != nil || string(data) != "# test plugin\n" {
+		t.Fatalf("repair blessed the corrupt source instead of restoring a verified copy: %q %v", data, err)
+	}
+}

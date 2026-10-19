@@ -144,6 +144,7 @@ func setupAdmin(operation string, arguments []string, input io.Reader, output io
 	if previousErr != nil && !os.IsNotExist(previousErr) {
 		return previousErr
 	}
+	recordedRepair := operation == "repair" && *source == "" && previousErr == nil
 	binary, err := os.Executable()
 	if err != nil {
 		return err
@@ -199,12 +200,22 @@ func setupAdmin(operation string, arguments []string, input io.Reader, output io
 	if err != nil {
 		return err
 	}
+	if recordedRepair && *shellFile == "" {
+		*shellFile = previous.ShellFile
+	}
 	*shellFile, err = setup.ShellFile(context.Background(), *shellFile, os.Environ())
 	if err != nil {
 		return err
 	}
+	if recordedRepair && (*prefix != previous.Prefix || *shellFile != previous.ShellFile) {
+		return errors.New("recorded repair uses the existing prefix and shell file; use setup upgrade with an explicit source to relocate integration")
+	}
 	if plugin == "" {
-		return errors.New("plugin source unavailable; pass --source <built-checkout-or-extracted-release>")
+		if recordedRepair {
+			plugin = filepath.Join(previous.Prefix, "share/zsh-git-inlay/zsh-git-inlay.plugin.zsh")
+		} else {
+			return errors.New("plugin source unavailable; pass --source <built-checkout-or-extracted-release>")
+		}
 	}
 	if !*noninteractive {
 		fmt.Fprintf(output, "Install prefix: %s\nDependency: %s\n", *prefix, *dependency)
@@ -220,13 +231,19 @@ func setupAdmin(operation string, arguments []string, input io.Reader, output io
 		}
 	}
 	options := lifecycle.Options{Prefix: *prefix, ShellFile: *shellFile, Autosuggestions: *dependency, Binary: binary, Plugin: plugin, Version: version + " (" + commit + ")", Notices: notices, MigrateLegacy: *migrate, Adopt: *adopt, Repair: *repairFiles, Configuration: &change}
-	result, err := manager.Install(options)
+	var result lifecycle.Result
+	if recordedRepair {
+		result, err = manager.RepairWithConfiguration(&change)
+		*prefix, *shellFile = previous.Prefix, previous.ShellFile
+	} else {
+		result, err = manager.Install(options)
+	}
 	if err != nil {
 		return err
 	}
 	report := map[string]any{"changed": result.Changed, "installation": result.Manifest, "repairs": repairs}
 	var postErrors []error
-	if result.Changed {
+	if result.Changed || operation == "repair" || operation == "upgrade" {
 		if err := stopForLifecycle(); err != nil {
 			postErrors = append(postErrors, err)
 		}
