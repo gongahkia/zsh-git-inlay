@@ -14,7 +14,7 @@ the maintainer's actual shell, choose a license, publish, or download models.
 - [ ] 2. Doctor: meaningful pass/warning/failure checks and exit status, exact
   causes/actions, shell activation/order/keymaps/async mode, component versions
   and stale sockets; conservative repair with backups and undo.
-- [ ] 3. Typed config show/validate/set/reset/repair: effective/default/source
+- [x] 3. Typed config show/validate/set/reset/repair: effective/default/source
   information, path/line/key diagnostics, preserve valid settings/comments,
   validate before atomic writes, handle malformed config without blanket reset.
 - [ ] 4. Wizard-exposed customization: providers/budgets, message length,
@@ -38,3 +38,11 @@ before declaring completion.
 
 - Current tree clean. No applicable AGENTS.md files found.
 - Reviewed official Zsh startup-file/option documentation and Go/TOML APIs.
+- Doctor now fails with the exact cause when global configuration is invalid.
+- Recoverable atomic edits retain private before/after backups, preserve symlink
+  dotfiles, reject concurrent/later edits, roll back interrupted multi-file
+  writes, and support idempotent undo. Race-tested these failure paths.
+- Typed config commands use pinned go-toml v2.4.3 (MIT); release snapshots,
+  installers, Homebrew preparation and the SBOM include its notice/dependency.
+  Repair quarantines invalid settings as comments, keeps valid choices, and
+  reports path/line/key; all writes validate first and print backup/undo paths.

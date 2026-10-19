@@ -58,6 +58,8 @@ func run(arguments []string) error {
 		return doctor(arguments[1:])
 	case "config":
 		return configCommand(arguments[1:])
+	case "undo":
+		return undoCommand(arguments[1:])
 	case "fingerprint":
 		return fingerprint(arguments[1:])
 	case "context":
@@ -282,7 +284,7 @@ func suggestStatus(jsonOutput bool, status string) error {
 
 func configCommand(arguments []string) error {
 	if len(arguments) != 1 || (arguments[0] != "cycle-keybinding" && arguments[0] != "cycle-keymaps") {
-		return errors.New("usage: zsh-git-inlay config {cycle-keybinding|cycle-keymaps}")
+		return configurationCommand(arguments)
 	}
 	settings, err := config.Load()
 	if err != nil {

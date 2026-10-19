@@ -46,7 +46,10 @@ README.md
 CHANGELOG.md'
 members=$(tar -tzf "$archive")
 [ "$members" = "$expected_members" ] || [ "$members" = "$expected_members
-LICENSE" ] || {
+LICENSE" ] || [ "$members" = "$expected_members
+THIRD_PARTY_NOTICES" ] || [ "$members" = "$expected_members
+LICENSE
+THIRD_PARTY_NOTICES" ] || {
 	printf '%s\n' 'release archive has unexpected members' >&2
 	exit 1
 }
@@ -55,11 +58,13 @@ stage=$(mktemp -d)
 tmp_binary=
 tmp_plugin=
 tmp_license=
+tmp_notices=
 cleanup() {
 	rm -rf -- "$stage"
 	[ -z "$tmp_binary" ] || rm -f -- "$tmp_binary"
 	[ -z "$tmp_plugin" ] || rm -f -- "$tmp_plugin"
 	[ -z "$tmp_license" ] || rm -f -- "$tmp_license"
+	[ -z "$tmp_notices" ] || rm -f -- "$tmp_notices"
 }
 trap cleanup EXIT HUP INT TERM
 for file in zsh-git-inlay zsh-git-inlay.plugin.zsh README.md CHANGELOG.md; do
@@ -68,10 +73,18 @@ for file in zsh-git-inlay zsh-git-inlay.plugin.zsh README.md CHANGELOG.md; do
 		exit 1
 	fi
 done
-if [ "$members" != "$expected_members" ]; then
-    tar -xOf "$archive" LICENSE > "$stage/LICENSE"
-    [ -s "$stage/LICENSE" ] || { printf '%s\n' 'release license is empty or unreadable' >&2; exit 1; }
-fi
+for notice in LICENSE THIRD_PARTY_NOTICES; do
+    case "
+$members
+" in
+        *"
+$notice
+"*)
+            tar -xOf "$archive" "$notice" > "$stage/$notice"
+            [ -s "$stage/$notice" ] || { printf '%s\n' "release notice is empty or unreadable: $notice" >&2; exit 1; }
+            ;;
+    esac
+done
 [ -s "$stage/zsh-git-inlay" ] || { printf '%s\n' 'release binary is empty' >&2; exit 1; }
 
 bin_dir="$prefix/bin"
@@ -85,6 +98,10 @@ if [ -f "$stage/LICENSE" ]; then
     tmp_license=$(mktemp "$plugin_dir/.LICENSE.XXXXXX")
     install -m 644 "$stage/LICENSE" "$tmp_license"
 fi
+if [ -f "$stage/THIRD_PARTY_NOTICES" ]; then
+    tmp_notices=$(mktemp "$plugin_dir/.THIRD_PARTY_NOTICES.XXXXXX")
+    install -m 644 "$stage/THIRD_PARTY_NOTICES" "$tmp_notices"
+fi
 mv -f "$tmp_binary" "$bin_dir/zsh-git-inlay"
 mv -f "$tmp_plugin" "$plugin_dir/zsh-git-inlay.plugin.zsh"
 tmp_binary=
@@ -92,6 +109,10 @@ tmp_plugin=
 if [ -n "$tmp_license" ]; then
     mv -f "$tmp_license" "$plugin_dir/LICENSE"
     tmp_license=
+fi
+if [ -n "$tmp_notices" ]; then
+    mv -f "$tmp_notices" "$plugin_dir/THIRD_PARTY_NOTICES"
+    tmp_notices=
 fi
 
 printf '%s\n' "installed release archive at $prefix"

@@ -45,7 +45,7 @@ def prepare(dist, version, license_id, source):
         *blocks, '  depends_on "git"', '  depends_on "zsh"', '  depends_on "zsh-autosuggestions"',
         "  def install", '    bin.install "zsh-git-inlay"',
         '    (share/"zsh-git-inlay").install "zsh-git-inlay.plugin.zsh"',
-        '    pkgshare.install "LICENSE"', "  end", "  test do",
+        '    pkgshare.install "LICENSE"', '    pkgshare.install "THIRD_PARTY_NOTICES" if File.exist?("THIRD_PARTY_NOTICES")', "  end", "  test do",
         '    system bin/"zsh-git-inlay", "setup", "--check"', "  end", "end", "",
     ])
 

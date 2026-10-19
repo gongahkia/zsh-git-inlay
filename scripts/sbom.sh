@@ -28,52 +28,5 @@ done
 case "$version" in
 	*[!A-Za-z0-9._-]*|"") printf '%s\n' 'invalid release version' >&2; exit 2 ;;
 esac
-module=$(
-	CDPATH=''
-	export CDPATH
-	cd -- "$source_dir" && go list -m -f '{{.Path}}'
-)
-case "$module" in
-	*[!A-Za-z0-9./_-]*|"") printf '%s\n' 'unexpected module identifier' >&2; exit 1 ;;
-esac
-temporary=$(mktemp "$(dirname "$output")/.sbom.XXXXXX")
-cleanup() {
-	[ -z "$temporary" ] || rm -f -- "$temporary"
-}
-trap cleanup EXIT HUP INT TERM
-cat > "$temporary" <<EOF
-{
-  "spdxVersion": "SPDX-2.3",
-  "dataLicense": "CC0-1.0",
-  "SPDXID": "SPDXRef-DOCUMENT",
-  "name": "zsh-git-inlay-${version}",
-  "documentNamespace": "https://github.com/gongahkia/zsh-git-inlay/spdx/${version}",
-  "creationInfo": {
-    "creators": ["Tool: zsh-git-inlay release snapshot"],
-    "created": "1970-01-01T00:00:00Z"
-  },
-  "packages": [
-    {
-      "SPDXID": "SPDXRef-Package-zsh-git-inlay",
-      "name": "${module}",
-      "versionInfo": "${version}",
-      "downloadLocation": "NOASSERTION",
-      "filesAnalyzed": false,
-      "licenseConcluded": "NOASSERTION",
-      "licenseDeclared": "NOASSERTION",
-      "copyrightText": "NOASSERTION",
-      "primaryPackagePurpose": "APPLICATION"
-    }
-  ],
-  "relationships": [
-    {
-      "spdxElementId": "SPDXRef-DOCUMENT",
-      "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-Package-zsh-git-inlay"
-    }
-  ]
-}
-EOF
-chmod 644 "$temporary"
-mv -f "$temporary" "$output"
-temporary=
+script_dir=$(CDPATH='' cd -- "$(dirname "$0")" && pwd -P)
+python3 "$script_dir/sbom.py" --source "$source_dir" --version "$version" --output "$output"

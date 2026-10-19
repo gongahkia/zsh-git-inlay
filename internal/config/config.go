@@ -1,9 +1,10 @@
-// Package config reads the deliberately small, declarative prototype config.
+// Package config validates and edits declarative user and repository preferences.
 package config
 
 import (
 	"crypto/sha256"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -27,26 +28,26 @@ const (
 )
 
 type Settings struct {
-	IdleTimeout         time.Duration
-	MaxRepositories     int
-	MaxGenerationJobs   int
-	CacheMaxRecords     int
-	CacheMaxBytes       int64
-	CacheMaxAge         time.Duration
-	Provider            string
-	ProviderModel       string
-	ProviderTimeout     time.Duration
-	OllamaContextTokens int
-	OllamaOutputTokens  int
-	OllamaKeepAlive     time.Duration
-	OllamaColdTimeout   time.Duration
-	ProviderFallback    string
-	GroundingPolicy     string
-	ActivityRetention   time.Duration
-	ActivityMaxEvents   int
-	CycleKeybinding     string
-	CycleKeymaps        []string
-	Verbose             bool
+	IdleTimeout         time.Duration `config:"daemon.idle_timeout"`
+	MaxRepositories     int           `config:"daemon.max_active_repositories"`
+	MaxGenerationJobs   int           `config:"daemon.max_generation_concurrency"`
+	CacheMaxRecords     int           `config:"cache.max_records"`
+	CacheMaxBytes       int64         `config:"cache.max_bytes"`
+	CacheMaxAge         time.Duration `config:"cache.max_age"`
+	Provider            string        `config:"provider.name"`
+	ProviderModel       string        `config:"provider.model"`
+	ProviderTimeout     time.Duration `config:"provider.timeout"`
+	OllamaContextTokens int           `config:"ollama.context_tokens"`
+	OllamaOutputTokens  int           `config:"ollama.output_tokens"`
+	OllamaKeepAlive     time.Duration `config:"ollama.keep_alive"`
+	OllamaColdTimeout   time.Duration `config:"ollama.cold_timeout"`
+	ProviderFallback    string        `config:"provider.fallback"`
+	GroundingPolicy     string        `config:"grounding.ambiguity"`
+	ActivityRetention   time.Duration `config:"activity.retention"`
+	ActivityMaxEvents   int           `config:"activity.max_events"`
+	CycleKeybinding     string        `config:"zsh.cycle_keybinding"`
+	CycleKeymaps        []string      `config:"zsh.cycle_keymaps"`
+	Verbose             bool          `config:"diagnostics.verbose"`
 	Version             string
 }
 
@@ -97,35 +98,24 @@ func Load() (Settings, error) {
 	if path == "" {
 		return settings, nil
 	}
-	content, err := os.ReadFile(path)
+	content, err := readContent(path)
 	if os.IsNotExist(err) {
 		return settings, nil
 	}
 	if err != nil {
 		return Settings{}, fmt.Errorf("read config: %w", err)
 	}
-	section, values, err := parse(string(content), map[string]bool{
-		"daemon.idle_timeout":               true,
-		"daemon.max_active_repositories":    true,
-		"daemon.max_generation_concurrency": true,
-		"cache.max_records":                 true,
-		"cache.max_bytes":                   true,
-		"cache.max_age":                     true,
-		"provider.name":                     true,
-		"provider.model":                    true,
-		"provider.timeout":                  true,
-		"ollama.context_tokens":             true,
-		"ollama.output_tokens":              true,
-		"ollama.keep_alive":                 true,
-		"ollama.cold_timeout":               true,
-		"provider.fallback":                 true,
-		"grounding.ambiguity":               true,
-		"activity.retention":                true,
-		"activity.max_events":               true,
-		"zsh.cycle_keybinding":              true,
-		"zsh.cycle_keymaps":                 true,
-		"diagnostics.verbose":               true,
-	})
+	return Parse(content, path)
+}
+
+// Path is the effective user configuration location, including XDG overrides.
+func Path() string { return configPath() }
+
+// Parse validates a document without reading or changing the environment.
+func Parse(content []byte, path string) (settings Settings, resultErr error) {
+	settings = Default()
+	defer func() { resultErr = withLocation(resultErr, content, path) }()
+	section, values, err := parse(string(content), allowedKeys(false))
 	_ = section
 	if err != nil {
 		return Settings{}, fmt.Errorf("invalid config %s: %w", path, err)
@@ -323,27 +313,45 @@ func DefaultRepositoryPolicy() RepositoryPolicy {
 	return RepositoryPolicy{Source: "built-in", Version: "none", Convention: "conventional", LineLength: 120, Capitalization: "lower", Body: "optional"}
 }
 
-// LoadRepositoryPolicy validates only message-policy settings. It is not a
-// general-purpose TOML parser and intentionally has no execution surface.
+// LoadRepositoryPolicy accepts only message-policy settings. Repository TOML
+// cannot enable a provider or grant access to private data.
 func LoadRepositoryPolicy(root string) (RepositoryPolicy, error) {
 	policy := DefaultRepositoryPolicy()
 	path := filepath.Join(root, ".zsh-git-inlay.toml")
-	content, err := os.ReadFile(path)
+	content, err := readContent(path)
 	if os.IsNotExist(err) {
 		return policy, nil
 	}
 	if err != nil {
 		return RepositoryPolicy{}, fmt.Errorf("read repository config: %w", err)
 	}
-	_, values, err := parse(string(content), map[string]bool{
-		"commit.convention":     true,
-		"commit.types":          true,
-		"commit.scopes":         true,
-		"commit.scope_paths":    true,
-		"commit.line_length":    true,
-		"commit.capitalization": true,
-		"commit.body":           true,
-	})
+	return ParseRepository(content, path)
+}
+
+func readContent(path string) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Size() > MaxConfigBytes {
+		return nil, &Diagnostic{Path: path, Line: 1, Message: "expected a regular configuration file of at most 1 MiB"}
+	}
+	content, err := io.ReadAll(io.LimitReader(file, MaxConfigBytes+1))
+	if err == nil && len(content) > MaxConfigBytes {
+		err = &Diagnostic{Path: path, Line: 1, Message: "configuration exceeds 1 MiB"}
+	}
+	return content, err
+}
+
+func ParseRepository(content []byte, path string) (policy RepositoryPolicy, resultErr error) {
+	policy = DefaultRepositoryPolicy()
+	defer func() { resultErr = withLocation(resultErr, content, path) }()
+	_, values, err := parse(string(content), allowedKeys(true))
 	if err != nil {
 		return RepositoryPolicy{}, fmt.Errorf("invalid repository config %s: %w", path, err)
 	}
@@ -469,52 +477,6 @@ func contains(values []string, value string) bool {
 	return false
 }
 
-func parse(content string, allowed map[string]bool) (string, map[string]string, error) {
-	section := ""
-	values := make(map[string]string)
-	for lineNo, raw := range strings.Split(content, "\n") {
-		line := strings.TrimSpace(strings.SplitN(raw, "#", 2)[0])
-		if line == "" {
-			continue
-		}
-		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
-			section = strings.TrimSpace(line[1 : len(line)-1])
-			if section == "" || strings.ContainsAny(section, " \t[]") {
-				return section, nil, fmt.Errorf("line %d: invalid section", lineNo+1)
-			}
-			continue
-		}
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) != 2 || section == "" {
-			return section, nil, fmt.Errorf("line %d: expected key = value inside a section", lineNo+1)
-		}
-		key := section + "." + strings.TrimSpace(parts[0])
-		value := strings.TrimSpace(parts[1])
-		if !allowed[key] {
-			return section, nil, fmt.Errorf("line %d: unsupported key %q", lineNo+1, key)
-		}
-		if value == "" || strings.ContainsAny(value, "\x00\r") {
-			return section, nil, fmt.Errorf("line %d: invalid value", lineNo+1)
-		}
-		if _, exists := values[key]; exists {
-			return section, nil, fmt.Errorf("line %d: duplicate key %q", lineNo+1, key)
-		}
-		values[key] = value
-	}
-	return section, values, nil
-}
-
-func unquote(value string) string {
-	if quoted(value) {
-		return value[1 : len(value)-1]
-	}
-	return value
-}
-
-func quoted(value string) bool {
-	return len(value) >= 2 && ((value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\''))
-}
-
 func safeProviderModel(value string) bool {
 	if value == "" || len(value) > 200 || strings.Contains(value, "://") {
 		return false
@@ -525,42 +487,4 @@ func safeProviderModel(value string) bool {
 		}
 	}
 	return true
-}
-
-func stringArray(value string) bool {
-	value = strings.TrimSpace(value)
-	if len(value) < 2 || value[0] != '[' || value[len(value)-1] != ']' {
-		return false
-	}
-	content := strings.TrimSpace(value[1 : len(value)-1])
-	if content == "" {
-		return true
-	}
-	for _, item := range strings.Split(content, ",") {
-		if !quoted(strings.TrimSpace(item)) {
-			return false
-		}
-	}
-	return true
-}
-
-func policyArray(value, key string) ([]string, error) {
-	if !stringArray(value) {
-		return nil, fmt.Errorf("%s must be a string array", key)
-	}
-	content := strings.TrimSpace(value[1 : len(value)-1])
-	if content == "" {
-		return nil, nil
-	}
-	seen := map[string]bool{}
-	items := make([]string, 0, strings.Count(content, ",")+1)
-	for _, raw := range strings.Split(content, ",") {
-		item := unquote(strings.TrimSpace(raw))
-		if item == "" || len(item) > 80 || seen[item] {
-			return nil, fmt.Errorf("%s contains an empty, oversized, or duplicate item", key)
-		}
-		seen[item] = true
-		items = append(items, item)
-	}
-	return items, nil
 }

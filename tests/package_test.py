@@ -10,9 +10,17 @@ import unittest
 
 PROJECT = Path(__file__).resolve().parent.parent
 prepare = runpy.run_path(str(PROJECT / "scripts/prepare-package.py"))["prepare"]
+inventory = runpy.run_path(str(PROJECT / "scripts/sbom.py"))["inventory"]
 
 
 class Packages(unittest.TestCase):
+    def test_sbom_includes_the_pinned_toml_dependency(self):
+        document = inventory(PROJECT, "test-version")
+        dependency = next(package for package in document["packages"] if package["name"] == "github.com/pelletier/go-toml/v2")
+        self.assertEqual(dependency["licenseDeclared"], "MIT")
+        self.assertEqual(dependency["versionInfo"], "v2.4.3")
+        self.assertIn({"spdxElementId": "SPDXRef-Package-zsh-git-inlay", "relationshipType": "DEPENDS_ON", "relatedSpdxElement": dependency["SPDXID"]}, document["relationships"])
+
     def test_formula_requires_license_and_checks_all_archives(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -67,16 +75,18 @@ class Packages(unittest.TestCase):
             binary.chmod(0o755)
             (source / "zsh-git-inlay.plugin.zsh").write_text("# fixture\n")
             (source / "LICENSE").write_text("fixture selected license\n")
+            (source / "THIRD_PARTY_NOTICES").write_text("fixture dependency license\n")
             prefix = root / "prefix"
             subprocess.run(["sh", str(PROJECT / "scripts/install.sh"), "--source", str(source), "--prefix", str(prefix)], check=True, capture_output=True)
             self.assertEqual((prefix / "share/zsh-git-inlay/LICENSE").read_text(), "fixture selected license\n")
+            self.assertEqual((prefix / "share/zsh-git-inlay/THIRD_PARTY_NOTICES").read_text(), "fixture dependency license\n")
 
     def test_binary_install_verifies_digest_before_writing(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             archive_path = root / "fixture.tar.gz"
             with tarfile.open(archive_path, "w:gz") as archive:
-                for name in ("zsh-git-inlay", "zsh-git-inlay.plugin.zsh", "README.md", "CHANGELOG.md", "LICENSE"):
+                for name in ("zsh-git-inlay", "zsh-git-inlay.plugin.zsh", "README.md", "CHANGELOG.md", "LICENSE", "THIRD_PARTY_NOTICES"):
                     content = b"fixture content\n"
                     member = tarfile.TarInfo(name)
                     member.size = len(content)
@@ -96,8 +106,10 @@ class Packages(unittest.TestCase):
             subprocess.run(args + [digest], env=environment, check=True, capture_output=True)
             self.assertEqual((prefix / "bin/zsh-git-inlay").read_bytes(), b"fixture content\n")
             self.assertEqual((prefix / "share/zsh-git-inlay/LICENSE").read_bytes(), b"fixture content\n")
+            self.assertEqual((prefix / "share/zsh-git-inlay/THIRD_PARTY_NOTICES").read_bytes(), b"fixture content\n")
             subprocess.run(["sh", str(PROJECT / "scripts/uninstall.sh"), "--prefix", str(prefix)], env=environment, check=True, capture_output=True)
             self.assertFalse((prefix / "share/zsh-git-inlay/LICENSE").exists())
+            self.assertFalse((prefix / "share/zsh-git-inlay/THIRD_PARTY_NOTICES").exists())
 
 
 if __name__ == "__main__":

@@ -76,6 +76,12 @@ for target in $targets; do
         touch -t 200001010000 "$stage/LICENSE"
         set -- "$@" LICENSE
     fi
+    if [ -f "$source_dir/THIRD_PARTY_NOTICES" ]; then
+        cp "$source_dir/THIRD_PARTY_NOTICES" "$stage/THIRD_PARTY_NOTICES"
+        chmod 644 "$stage/THIRD_PARTY_NOTICES"
+        touch -t 200001010000 "$stage/THIRD_PARTY_NOTICES"
+        set -- "$@" THIRD_PARTY_NOTICES
+    fi
 	archive="$output/zsh-git-inlay_${version}_${target}.tar.gz"
 	python3 "$script_dir/archive.py" --source "$stage" --output "$archive" "$@"
 	chmod 644 "$archive"
