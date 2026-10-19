@@ -2,6 +2,17 @@
 emulate -L zsh
 setopt errexit nounset pipefail
 project=${0:A:h:h}
+fixture=$(mktemp -d)
+trap 'command rm -rf -- "$fixture"' EXIT
+command mkdir "$fixture/bin"
+export ZSH_GIT_INLAY_HELPER_MARKER="$fixture/helper-launched"
+cat > "$fixture/bin/zsh-git-inlay" <<'SH'
+#!/bin/sh
+: > "$ZSH_GIT_INLAY_HELPER_MARKER"
+exit 99
+SH
+command chmod 755 "$fixture/bin/zsh-git-inlay"
+path=("$fixture/bin" $path)
 source "${ZSH_AUTOSUGGESTIONS_SOURCE:?}"
 typeset -g ZSH_GIT_INLAY_CYCLE_KEYBINDING='^Xg'
 typeset -ga ZSH_GIT_INLAY_CYCLE_KEYMAPS=(emacs viins)
@@ -10,13 +21,16 @@ before_vi=$(bindkey -M viins '^Xg')
 source "$project/zsh-git-inlay.plugin.zsh"
 source "$project/zsh-git-inlay.plugin.zsh"
 [[ ${#${(M)ZSH_AUTOSUGGEST_STRATEGY:#git-inlay}} == 1 ]]
-# Any helper invocation here fails: unrelated typing must stay in-process.
-zsh-git-inlay() { print -u2 -- 'unexpected helper launch'; return 99 }
+# An executable fixture catches `command` invocations, which bypass functions.
 for buffer in 'echo hi' 'ls' 'gitstatus' 'g' ''; do
   suggestion=''
   _zsh_autosuggest_strategy_git-inlay "$buffer"
   [[ -z $suggestion ]]
 done
+[[ ! -e $ZSH_GIT_INLAY_HELPER_MARKER ]] || { print -u2 -- 'unrelated typing launched the helper'; exit 1 }
+# Positive control: prove the fixture observes a supported command's launch.
+_zsh_autosuggest_strategy_git-inlay 'git commit -m '
+[[ -e $ZSH_GIT_INLAY_HELPER_MARKER ]] || { print -u2 -- 'helper fixture did not observe a supported fetch'; exit 1 }
 for buffer in 'git commit -m ' $' \tgit\tcommit -m ' 'command git commit -m ' 'git --no-pager commit -m '; do
   _zsh_git_inlay_maybe_commit "$buffer"
 done
