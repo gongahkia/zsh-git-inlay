@@ -40,6 +40,9 @@ jobs:
       - name: bounded fuzz regression
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         run: make fuzz FUZZ_TIME=10s
+      - name: full helper performance samples
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: go test -run '^$' -bench BenchmarkSuggestHelper -benchtime=10x ./cmd/zsh-git-inlay
 
   snapshot:
     name: release snapshot

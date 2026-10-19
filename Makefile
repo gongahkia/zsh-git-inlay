@@ -77,7 +77,7 @@ lint:
 	! rg -n '\beval\b|function[[:space:]]+git\b' zsh-git-inlay.plugin.zsh cmd internal
 
 bench:
-	$(GO) test -run '^$$' -bench . -benchmem ./internal/command ./internal/gitstate ./internal/candidate ./internal/daemon
+	$(GO) test -run '^$$' -bench . -benchmem ./internal/command ./internal/gitstate ./internal/candidate ./internal/daemon ./cmd/zsh-git-inlay
 
 release-snapshot:
 	sh scripts/release-snapshot.sh --source "$(abspath .)" --output "$(abspath $(DIST))" --version "$(VERSION)" --commit "$(COMMIT)"
