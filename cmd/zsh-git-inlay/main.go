@@ -345,14 +345,14 @@ func explain(arguments []string) error {
 		return err
 	}
 	if state.Availability != gitstate.Ready {
-		return fmt.Errorf("%s: %s", state.Availability, state.Reason)
+		return printDiagnostic(daemon.Diagnostic{Status: string(state.Availability), Reason: state.Reason, Action: daemon.DiagnosticAction(string(state.Availability))}, *jsonOutput)
 	}
 	reply, err := call(ipc.Request{Version: ipc.Version, Operation: "lookup", Fingerprint: state.Fingerprint, Repository: state.RepoID, Worktree: state.WorktreeID}, 100*time.Millisecond)
 	if err != nil {
-		return fmt.Errorf("daemon unavailable: %w", err)
+		return printDiagnostic(repositoryDiagnostic(cwd, ""), *jsonOutput)
 	}
 	if reply.Status != "ready" {
-		return fmt.Errorf("explain %s", reply.Status)
+		return printDiagnostic(repositoryDiagnostic(cwd, ""), *jsonOutput)
 	}
 	var record daemon.Record
 	if err := json.Unmarshal(reply.Payload, &record); err != nil {
@@ -396,25 +396,32 @@ func explain(arguments []string) error {
 }
 
 func status(arguments []string) error {
-	flags, _, jsonOutput := commonFlags("status")
+	flags, cwdFlag, jsonOutput := commonFlags("status")
+	buffer := flags.String("buffer", "", "optional command buffer to diagnose")
 	if err := flags.Parse(arguments); err != nil {
 		return err
 	}
-	reply, err := call(ipc.Request{Version: ipc.Version, Operation: "status"}, 100*time.Millisecond)
+	if flags.NArg() != 0 {
+		return errors.New("usage: zsh-git-inlay status [--cwd directory] [--buffer command] [--json]")
+	}
+	cwd, err := resolveCWD(*cwdFlag)
 	if err != nil {
-		if *jsonOutput {
-			return printJSON(map[string]string{"status": "daemon_unavailable"})
-		}
-		fmt.Println("daemon unavailable")
-		return nil
+		return err
+	}
+	diagnostic := repositoryDiagnostic(cwd, *buffer)
+	reply, callErr := call(ipc.Request{Version: ipc.Version, Operation: "status"}, 100*time.Millisecond)
+	report := map[string]any{}
+	if callErr == nil {
+		_ = json.Unmarshal(reply.Payload, &report)
+	}
+	report["repository"] = diagnostic
+	if callErr != nil {
+		report["status"] = "daemon_unavailable"
 	}
 	if *jsonOutput {
-		fmt.Print(string(reply.Payload))
-		fmt.Println()
-		return nil
+		return printJSON(report)
 	}
-	fmt.Println(string(reply.Payload))
-	return nil
+	return printDiagnostic(diagnostic, false)
 }
 
 func evaluateCommand(arguments []string) error {

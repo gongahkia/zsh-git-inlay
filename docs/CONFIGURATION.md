@@ -76,3 +76,9 @@ Cycling binds both `emacs` and `viins` by default. Set
 `[zsh] cycle_keymaps = ["viins"]` (or include `vicmd`) to choose keymaps;
 `ZSH_GIT_INLAY_CYCLE_KEYMAPS=(viins)` before sourcing overrides the setting.
 Unloading restores each original binding. Re-sourcing is idempotent.
+
+Use `status --cwd /path/to/worktree --json` for a repository-specific quiet-state
+explanation alongside global daemon counts. `--buffer 'git commit -m prefix'`
+also diagnoses unsupported commands and prefixes without prepared matches.
+`explain` returns an actionable diagnostic when no candidate is available.
+These explicit commands never start generation; the typing strategy stays quiet.

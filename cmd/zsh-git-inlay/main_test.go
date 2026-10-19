@@ -478,3 +478,33 @@ func commandGit(t *testing.T, cwd string, arguments ...string) {
 		t.Fatalf("git %v: %v\n%s", arguments, err, output)
 	}
 }
+
+func TestRepositoryStatusExplainsPrefixesWithoutGeneration(t *testing.T) {
+	repository := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("ZSH_GIT_INLAY_RUNTIME_DIR", filepath.Join(t.TempDir(), "runtime"))
+	t.Setenv("ZSH_GIT_INLAY_CACHE_DIR", t.TempDir())
+	t.Setenv("ZSH_GIT_INLAY_DATA_DIR", t.TempDir())
+	commandGit(t, repository, "init", "-q", "-b", "main")
+	if err := os.WriteFile(filepath.Join(repository, "file.txt"), []byte("staged\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	commandGit(t, repository, "add", ".")
+	stop := startComposeDaemon(t, repository)
+	defer stop()
+	for _, item := range []struct{ buffer, status string }{{"git commit -m ", "ready"}, {"git commit -m nonexistent-prefix", "constrained_no_match"}, {"git merge", "unsupported_command"}} {
+		output, err := captureCommandOutput(func() error { return run([]string{"status", "--cwd", repository, "--buffer", item.buffer, "--json"}) })
+		if err != nil {
+			t.Fatal(err)
+		}
+		var value struct {
+			Repository daemon.Diagnostic `json:"repository"`
+		}
+		if err := json.Unmarshal([]byte(output), &value); err != nil {
+			t.Fatal(err)
+		}
+		if value.Repository.Status != item.status || value.Repository.Action == "" {
+			t.Fatalf("%s: %s", item.buffer, output)
+		}
+	}
+}

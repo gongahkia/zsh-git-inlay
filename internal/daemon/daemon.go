@@ -318,6 +318,8 @@ func (server *Server) handle(connection net.Conn) {
 		reply = server.observe(request.CWD)
 	case "lookup":
 		reply = server.lookup(request)
+	case "diagnose":
+		reply = server.diagnose(request.CWD)
 	case "status":
 		reply = server.status()
 	case "event":
