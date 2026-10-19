@@ -5,6 +5,16 @@ are written before a tag is created; generated snapshots are not releases.
 
 ## Unreleased
 
+- Added staged-facts suggestions and an unchanged metadata comparison provider;
+  configurable local inference budgets/timings and model qualification gates;
+  repository-specific quiet-state explanations; installed setup/check/demo;
+  checksum-pinned binary and Homebrew preparation; emacs/vi cycling, a shell
+  prefilter, full-helper p95 benchmarks and scheduled race/fuzz CI; expanded
+  versioned evaluation and private blinded human review.
+- Verified macOS amd64 runtime and installation, fixed platform test/socket
+  assumptions and deterministic archive metadata, and retained selected license
+  notices through installation/uninstallation. No license or release selected.
+
 - Ran the approved loopback-only Ollama comparison. Qwen2.5-Coder 0.5B,
   Qwen2.5-Coder 1.5B, and Qwen2.5 0.5B failed the frozen development gate;
   deterministic remains the default.

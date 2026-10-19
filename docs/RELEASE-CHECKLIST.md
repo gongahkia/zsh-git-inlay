@@ -4,10 +4,17 @@
 
 **TECHNICALLY READY, EXTERNALLY BLOCKED** is the RC1 conclusion. It is not
 RELEASE-READY because the project has no selected license, no remote CI
-execution, no macOS runtime execution, and no maintainer
+execution, and no maintainer
 visual/usability or independent review. No release is created by this checklist.
 
-## Local RC1 evidence
+Local macOS amd64 execution was added on 2026-10-19: the full test/lint suite,
+race run, seven bounded fuzz targets, native archive installation, reproducible
+snapshots and installed-plugin PTY/soak checks passed. Setup, provider diagnostic
+recovery and private human-review tooling were also exercised. See
+[NEXT-IMPLEMENTATION.md](NEXT-IMPLEMENTATION.md) for the code-change audit. This
+does not clear license, remote CI, human review, or live-model qualification gates.
+
+## Original local RC1 evidence (Fedora audit)
 
 | Item | Status |
 | --- | --- |

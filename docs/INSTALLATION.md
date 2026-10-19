@@ -2,18 +2,19 @@
 
 ## Supported evidence
 
-Fedora Linux 43 is the only environment exercised locally for the full runtime,
-Zsh integration, install/upgrade/uninstall, and release-snapshot tests. The
-snapshot builder cross-compiles `linux/{amd64,arm64}` and `darwin/{amd64,arm64}`
-archives, but macOS runtime execution has not been performed on this host.
-The GitHub Actions workflow is prepared for Linux and macOS but has not run
-from this local checkout. These are not package publications or platform-wide
-compatibility claims.
+The original RC1 audit exercised Fedora Linux 43. On 2026-10-19, macOS
+amd64 was additionally exercised with Go 1.27.0, Zsh 5.9, Apple Git 2.39.5
+from `/Library/Developer/CommandLineTools/usr/bin`, and zsh-autosuggestions
+v0.7.1. Full Go/Zsh/Neovim integration, setup/demo, source/native-archive
+installation, upgrade/uninstall, race, fuzz, installed-plugin PTY dogfooding,
+soak and reproducible four-target release-snapshot checks passed locally.
 
-RC1 validated the source and Linux-archive paths in temporary XDG directories,
-including spaces in the install prefix, reinstall, default local-data
-preservation, explicit purge, and a permission-denied prefix when the host user
-is non-root. It did not execute a macOS binary or a remote CI job.
+The snapshot builder cross-compiles Linux/macOS amd64/arm64 archives; this is
+runtime evidence for the documented Fedora host and macOS amd64 only. Remote
+GitHub Actions, macOS arm64 runtime, human terminal review and package publication
+remain unperformed. Installer checks include spaces, data retention/purge,
+permission-denied paths and checksum rejection. Selected LICENSE files are
+retained by source/archive installers and removed with the product on uninstall.
 
 Requirements are Git, Zsh 5.0.8+, Go 1.26.7 to reproduce the current build,
 and `zsh-autosuggestions` loaded before the plugin. On Fedora, install the
