@@ -41,7 +41,7 @@ plugin="$prefix/share/zsh-git-inlay/zsh-git-inlay.plugin.zsh"
 if [ -x "$binary" ]; then
 	"$binary" daemon stop >/dev/null 2>&1 || true
 fi
-rm -f -- "$binary" "$plugin"
+rm -f -- "$binary" "$plugin" "$prefix/share/zsh-git-inlay/LICENSE"
 rmdir "$prefix/share/zsh-git-inlay" 2>/dev/null || true
 rmdir "$prefix/share" 2>/dev/null || true
 rmdir "$prefix/bin" 2>/dev/null || true

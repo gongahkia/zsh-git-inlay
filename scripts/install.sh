@@ -53,17 +53,27 @@ plugin_dir="$prefix/share/zsh-git-inlay"
 mkdir -p "$bin_dir" "$plugin_dir"
 tmp_binary=$(mktemp "$bin_dir/.zsh-git-inlay.XXXXXX")
 tmp_plugin=$(mktemp "$plugin_dir/.zsh-git-inlay.plugin.zsh.XXXXXX")
+tmp_license=
 cleanup() {
 	[ -z "$tmp_binary" ] || rm -f -- "$tmp_binary"
 	[ -z "$tmp_plugin" ] || rm -f -- "$tmp_plugin"
+	[ -z "$tmp_license" ] || rm -f -- "$tmp_license"
 }
 trap cleanup EXIT HUP INT TERM
 install -m 755 "$binary" "$tmp_binary"
 install -m 644 "$plugin" "$tmp_plugin"
+if [ -f "$source_dir/LICENSE" ]; then
+    tmp_license=$(mktemp "$plugin_dir/.LICENSE.XXXXXX")
+    install -m 644 "$source_dir/LICENSE" "$tmp_license"
+fi
 mv -f "$tmp_binary" "$bin_dir/zsh-git-inlay"
 mv -f "$tmp_plugin" "$plugin_dir/zsh-git-inlay.plugin.zsh"
 tmp_binary=
 tmp_plugin=
+if [ -n "$tmp_license" ]; then
+    mv -f "$tmp_license" "$plugin_dir/LICENSE"
+    tmp_license=
+fi
 
 printf '%s\n' "installed $bin_dir/zsh-git-inlay"
 printf '%s\n' 'add this after zsh-autosuggestions in .zshrc:'

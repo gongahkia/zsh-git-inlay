@@ -57,12 +57,26 @@ class Packages(unittest.TestCase):
                     self.assertEqual((member.uid, member.gid, member.mtime), (0, 0, 946684800))
             self.assertEqual(outputs[0].read_bytes()[4:8], bytes(4))
 
+    def test_source_install_preserves_a_selected_license(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            (source / ".build").mkdir(parents=True)
+            binary = source / ".build/zsh-git-inlay"
+            binary.write_text("#!/bin/sh\nexit 0\n")
+            binary.chmod(0o755)
+            (source / "zsh-git-inlay.plugin.zsh").write_text("# fixture\n")
+            (source / "LICENSE").write_text("fixture selected license\n")
+            prefix = root / "prefix"
+            subprocess.run(["sh", str(PROJECT / "scripts/install.sh"), "--source", str(source), "--prefix", str(prefix)], check=True, capture_output=True)
+            self.assertEqual((prefix / "share/zsh-git-inlay/LICENSE").read_text(), "fixture selected license\n")
+
     def test_binary_install_verifies_digest_before_writing(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             archive_path = root / "fixture.tar.gz"
             with tarfile.open(archive_path, "w:gz") as archive:
-                for name in ("zsh-git-inlay", "zsh-git-inlay.plugin.zsh", "README.md", "CHANGELOG.md"):
+                for name in ("zsh-git-inlay", "zsh-git-inlay.plugin.zsh", "README.md", "CHANGELOG.md", "LICENSE"):
                     content = b"fixture content\n"
                     member = tarfile.TarInfo(name)
                     member.size = len(content)
@@ -81,6 +95,9 @@ class Packages(unittest.TestCase):
             digest = hashlib.sha256(archive_path.read_bytes()).hexdigest()
             subprocess.run(args + [digest], env=environment, check=True, capture_output=True)
             self.assertEqual((prefix / "bin/zsh-git-inlay").read_bytes(), b"fixture content\n")
+            self.assertEqual((prefix / "share/zsh-git-inlay/LICENSE").read_bytes(), b"fixture content\n")
+            subprocess.run(["sh", str(PROJECT / "scripts/uninstall.sh"), "--prefix", str(prefix)], env=environment, check=True, capture_output=True)
+            self.assertFalse((prefix / "share/zsh-git-inlay/LICENSE").exists())
 
 
 if __name__ == "__main__":

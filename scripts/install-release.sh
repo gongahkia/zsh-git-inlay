@@ -54,10 +54,12 @@ LICENSE" ] || {
 stage=$(mktemp -d)
 tmp_binary=
 tmp_plugin=
+tmp_license=
 cleanup() {
 	rm -rf -- "$stage"
 	[ -z "$tmp_binary" ] || rm -f -- "$tmp_binary"
 	[ -z "$tmp_plugin" ] || rm -f -- "$tmp_plugin"
+	[ -z "$tmp_license" ] || rm -f -- "$tmp_license"
 }
 trap cleanup EXIT HUP INT TERM
 for file in zsh-git-inlay zsh-git-inlay.plugin.zsh README.md CHANGELOG.md; do
@@ -66,6 +68,10 @@ for file in zsh-git-inlay zsh-git-inlay.plugin.zsh README.md CHANGELOG.md; do
 		exit 1
 	fi
 done
+if [ "$members" != "$expected_members" ]; then
+    tar -xOf "$archive" LICENSE > "$stage/LICENSE"
+    [ -s "$stage/LICENSE" ] || { printf '%s\n' 'release license is empty or unreadable' >&2; exit 1; }
+fi
 [ -s "$stage/zsh-git-inlay" ] || { printf '%s\n' 'release binary is empty' >&2; exit 1; }
 
 bin_dir="$prefix/bin"
@@ -75,10 +81,18 @@ tmp_binary=$(mktemp "$bin_dir/.zsh-git-inlay.XXXXXX")
 tmp_plugin=$(mktemp "$plugin_dir/.zsh-git-inlay.plugin.zsh.XXXXXX")
 install -m 755 "$stage/zsh-git-inlay" "$tmp_binary"
 install -m 644 "$stage/zsh-git-inlay.plugin.zsh" "$tmp_plugin"
+if [ -f "$stage/LICENSE" ]; then
+    tmp_license=$(mktemp "$plugin_dir/.LICENSE.XXXXXX")
+    install -m 644 "$stage/LICENSE" "$tmp_license"
+fi
 mv -f "$tmp_binary" "$bin_dir/zsh-git-inlay"
 mv -f "$tmp_plugin" "$plugin_dir/zsh-git-inlay.plugin.zsh"
 tmp_binary=
 tmp_plugin=
+if [ -n "$tmp_license" ]; then
+    mv -f "$tmp_license" "$plugin_dir/LICENSE"
+    tmp_license=
+fi
 
 printf '%s\n' "installed release archive at $prefix"
 printf '%s\n' 'add this after zsh-autosuggestions in .zshrc:'
