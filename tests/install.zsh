@@ -50,9 +50,20 @@ if command sh "$project/scripts/release-snapshot.sh" --source "$project" --outpu
   print -u2 -- 'release snapshot overwrote an existing output'
   exit 1
 fi
+case "$(command uname -s)" in
+  Darwin) host_os=darwin ;;
+  Linux) host_os=linux ;;
+  *) print -u2 -- 'unsupported test host'; exit 1 ;;
+esac
+case "$(command uname -m)" in
+  x86_64|amd64) host_arch=amd64 ;;
+  arm64|aarch64) host_arch=arm64 ;;
+  *) print -u2 -- 'unsupported test architecture'; exit 1 ;;
+esac
+host_target="$host_os-$host_arch"
 extract="$root/extract"
 command mkdir "$extract"
-command tar -xzf "$first/zsh-git-inlay_test-0.1.0_linux-amd64.tar.gz" -C "$extract"
+command tar -xzf "$first/zsh-git-inlay_test-0.1.0_${host_target}.tar.gz" -C "$extract"
 packaged_version=$(command "$extract/zsh-git-inlay" version --json)
 [[ $packaged_version == *'"version": "test-0.1.0"'* && $packaged_version == *'"commit": "0123456789abcdef"'* ]] || {
   print -u2 -- 'release binary lacks requested version metadata'
@@ -60,7 +71,7 @@ packaged_version=$(command "$extract/zsh-git-inlay" version --json)
 }
 
 release_prefix="$root/release prefix"
-command sh "$project/scripts/install-release.sh" --archive "$first/zsh-git-inlay_test-0.1.0_linux-amd64.tar.gz" --prefix "$release_prefix"
+command sh "$project/scripts/install-release.sh" --archive "$first/zsh-git-inlay_test-0.1.0_${host_target}.tar.gz" --prefix "$release_prefix"
 [[ -x "$release_prefix/bin/zsh-git-inlay" && -r "$release_prefix/share/zsh-git-inlay/zsh-git-inlay.plugin.zsh" ]] || {
   print -u2 -- 'release archive install did not create expected files'
   exit 1

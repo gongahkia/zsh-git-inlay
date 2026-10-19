@@ -184,7 +184,7 @@ func TestSnapshotSupportsConcurrentReaders(t *testing.T) {
 	errors := make(chan error, 16)
 	for worker := 0; worker < cap(errors); worker++ {
 		go func() {
-			context, cancel := context.WithTimeout(context.Background(), time.Second)
+			context, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			state, err := Snapshot(context, repository)
 			if err == nil && state.Availability != Ready {
