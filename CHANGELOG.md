@@ -5,6 +5,14 @@ are written before a tag is created; generated snapshots are not releases.
 
 ## Unreleased
 
+- Added managed setup/customization/repair/removal wizard, redirected/symlinked
+  Zsh startup support, private backups, conflict-safe undo and removal recovery.
+- Added typed config inspection/editing/selective repair and layered message
+  preferences that adapt generated candidates before grounding.
+- Added actionable doctor checks, actual normal/login shell probes, verified
+  artifact repair, running-build detection and safe stale-socket recovery.
+- Added immediate global/repository disable and snooze, bounded explicit local
+  feedback, graceful daemon shutdown and isolated full lifecycle rehearsals.
 - Added staged-facts suggestions and an unchanged metadata comparison provider;
   configurable local inference budgets/timings and model qualification gates;
   repository-specific quiet-state explanations; installed setup/check/demo;

@@ -7,7 +7,7 @@ the maintainer's actual shell, choose a license, publish, or download models.
 
 ## Requirements and verification
 
-- [ ] 1. Install/upgrade/disable/remove wizard and CLI: one managed shell block,
+- [x] 1. Install/upgrade/disable/remove wizard and CLI: one managed shell block,
   ZDOTDIR support, backups, idempotence, symlink preservation, safe undo,
   retained preferences by default and explicit purge. Verify interrupted work,
   changed files, repeat operations and actual interactive-shell activation.
@@ -20,9 +20,9 @@ the maintainer's actual shell, choose a license, publish, or download models.
 - [x] 4. Wizard-exposed customization: providers/budgets, message length,
   capitalization/scopes, candidate count, bindings, and learning. Preferences
   influence generation while grounding remains mandatory.
-- [ ] 5. Global/repository enable-disable and temporary snooze, immediate cached
+- [x] 5. Global/repository enable-disable and temporary snooze, immediate cached
   lookup enforcement, local explicit feedback independent of inferred learning.
-- [ ] 6. Lifecycle tests: interruption, repeat setup, symlinked dotfiles,
+- [x] 6. Lifecycle tests: interruption, repeat setup, symlinked dotfiles,
   broken config, old running daemon, rollback with subsequent user edits,
   uninstall and end-to-end installation-to-removal rehearsal.
 
@@ -36,7 +36,7 @@ before declaring completion.
 
 ## Progress
 
-- Current tree clean. No applicable AGENTS.md files found.
+- Starting tree was clean. No applicable AGENTS.md files found.
 - Reviewed official Zsh startup-file/option documentation and Go/TOML APIs.
 - Doctor now fails with the exact cause when global configuration is invalid.
 - Recoverable atomic edits retain private before/after backups, preserve symlink
@@ -51,18 +51,18 @@ before declaring completion.
   scope omission and short factual subjects before grounding; count applies
   after ranking. Global learning disable prevents collection and reuse. Relevant
   configuration/provider/daemon/grounding/Git/CLI packages passed race tests.
-  Wizard exposure remains part of task 4.
+  The wizard and validated batch CLI expose these settings.
 - Controls and explicit feedback are implemented; lookup checks persisted state
   independently of notifications, pending generation is cancellable, snoozes
   expire, and explicit usefulness labels contain only scoped hashes. Feedback
-  retention is bounded and clearing leaves no backup copy. Integration rehearsal
-  and doctor/wizard exposure remain to be completed.
+  retention is bounded and clearing leaves no backup copy. CLI and real-shell
+  lifecycle rehearsals cover these controls and labels.
 - Lifecycle engine manages manifest-recorded files and exactly one shell block,
   preserves symlinked dotfiles, migrates literal legacy source lines only when
   requested, verifies artifact hashes/targets, refuses artifact symlinks, and
   supports idempotent install/upgrade/uninstall. Marked-block undo preserves
   unrelated later edits; interrupted merged undo also recovers. Race-tested the
-  engine; installation/removal wizard and interactive-shell doctor are next.
+  engine, with installed normal/login shell verification in the CLI rehearsals.
 - Startup discovery honors ZDOTDIR after .zshenv, following the
   [documented Zsh startup order](https://zsh.sourceforge.io/Doc/Release/Files.html).
   Bounded normal/login interactive probes report actual loaded components,
@@ -79,7 +79,7 @@ before declaring completion.
   a private recovery helper; explicit purge validates dedicated product paths.
   Isolated CLI tests cover cancellation, reviewed customization, invalid
   provider batches, idempotent setup, removal, undo, and purge. Race checks pass.
-  Full real-shell lifecycle rehearsal and enhanced doctor remain outstanding.
+  Full real-shell lifecycle rehearsals and enhanced doctor checks are included.
 - Daemon status now captures version/commit/protocol/plugin contract and the
   executable digest once at startup, so an older process can be identified
   after an upgrade. Recorded repair restores manifest-matching bytes from
@@ -91,7 +91,8 @@ before declaring completion.
   active keymaps/conflicts, async mode, component consistency and source paths.
   --fix recovers interrupted writes, selectively repairs user/repo preferences,
   restores verified owned artifacts/blocks, repairs corrupt controls to disabled
-  and restarts an older daemon. Durable changes include backup/undo records;
+  and stops an older daemon so the next prompt starts the current helper.
+  Durable changes include backup/undo records;
   ambiguous/unowned changes remain explicit failures.
 - Read-only doctor/history inspection creates no runtime directories or lock
   files. Named pipes cannot hang config/source inspection. Private socket mode
@@ -99,3 +100,114 @@ before declaring completion.
   Unit environments isolate HOME/XDG, credentials and Git configuration. A real
   test process is killed after its first write and recovery restores the entire
   transaction. Relevant package race tests and repeated shutdown tests pass.
+- Real-helper lifecycle rehearsals pass with zsh-autosuggestions v0.7.1: first
+  actual shell suggestion, redirected ZDOTDIR and symlinked rc, tuning/scopes,
+  explicit feedback, cached disable/snooze, broken config and artifact repair,
+  an older running executable whose on-disk file has been replaced, safe refusal
+  of duplicate blocks, removal, executable recovery/undo, and explicit purge.
+  Sentinel files and staged Git changes survive throughout.
+- The complete local `make test lint` suite passed, including Go, Zsh/PTY,
+  Neovim, release reproducibility/installation, soak and lifecycle checks.
+  A regression test also exposed ambient preferences affecting the explicit
+  evaluation baseline; generation now uses its supplied settings beneath repo
+  overrides. Relevant configuration/daemon/evaluation race checks pass.
+- Test runners also remove inherited Git directory/index/object/config
+  overrides before creating fixtures. A regression test checks isolation and
+  restoration of the caller's environment; a private HOME alone is insufficient
+  to prevent an inherited `GIT_INDEX_FILE` from redirecting fixture writes.
+
+## Local validation
+
+Validated on macOS/amd64 with Go 1.27.0, Zsh 5.9 and
+zsh-autosuggestions v0.7.1:
+
+- `make test lint` passed: Go tests, packaging, actual shell/PTY integration,
+  crash recovery, evaluation, Neovim, reproducible four-target release snapshots,
+  installation/removal, multi-shell soak and both lifecycle rehearsals.
+- `go test -race ./...` passed, including the inherited-environment regression.
+- `make fuzz FUZZ_TIME=1s` passed all seven bounded fuzz targets, including
+  configuration parsing/repair after the literal-dotted-key regression fix.
+- `actionlint` passed for the CI changes.
+- A 10-sample `BenchmarkSuggestHelper` smoke run passed with both 10-record and
+  10,000-record indexes. It ran under concurrent local test load; those timings
+  are diagnostic samples rather than a latency guarantee.
+
+Run the broad suites sequentially when reproducing these gates: overlapping
+complete/race runs on this machine exceeded fixed Git snapshot deadlines.
+Hosted CI execution and live-model suggestion usefulness remain unverified by
+these local checks. The automated provider checks use local fixtures/mocks;
+no model was downloaded and no cloud generation was requested.
+
+## Try locally
+
+Git, Zsh and zsh-autosuggestions are prerequisites. The wizard discovers common
+dependency locations or accepts `--autosuggestions /absolute/path/to/source`.
+For a missing dependency, follow its
+[upstream installation guide](https://github.com/zsh-users/zsh-autosuggestions/blob/master/INSTALL.md).
+The following commands intentionally install into your own shell; the automated
+rehearsals above used disposable homes only.
+
+```sh
+make build
+.build/zsh-git-inlay setup --wizard
+```
+
+Review the wizard's paths/preferences and apply. Open a new Zsh session, then
+run these from a repository with staged changes:
+
+```sh
+zsh-git-inlay doctor --check
+zsh-git-inlay observe --cwd .
+zsh-git-inlay status --cwd .
+```
+
+Type `git commit -m ` and use your usual autosuggestion acceptance binding.
+Default cycling is Ctrl-X, then g in emacs/vi insert mode. No commit is executed
+by the suggestion provider. Deterministic generation is the default; choosing
+Ollama exposes model/budget settings without downloading a model. Cloud use
+still requires an explicit context grant and credential.
+
+Use `setup --wizard` and choose customize for the guided preferences flow, or
+make a validated batch directly:
+
+```sh
+zsh-git-inlay setup customize \
+  --set commit.capitalization=sentence \
+  --set commit.line_length=72 \
+  --set suggestions.candidate_count=2
+zsh-git-inlay config show
+zsh-git-inlay feedback useful --candidate 1 --cwd .
+zsh-git-inlay feedback too-generic --candidate 2 --cwd .
+zsh-git-inlay feedback show --cwd .
+zsh-git-inlay disable --repo --cwd .
+zsh-git-inlay enable --repo --cwd .
+zsh-git-inlay snooze 30m --repo --cwd .
+zsh-git-inlay enable --repo --cwd .
+```
+
+Feedback labels the currently prepared candidate and retains only scoped hashes
+and labels. Disable/enable/snooze apply globally when `--repo` is omitted. Local
+learning has an independent `learning.enabled` preference. Config/keymap changes
+take effect in new shells; preparation sees generation preferences on observe.
+
+```sh
+zsh-git-inlay doctor --fix
+zsh-git-inlay undo list
+zsh-git-inlay undo <printed-transaction-id>
+zsh-git-inlay uninstall
+```
+
+Removal prints the retained private helper's exact undo command, so recovery
+works after removing the installed executable from PATH. Run
+`zsh_git_inlay_unload` in an already-open shell, or start a new one, to unload
+its in-memory hooks/bindings. Default removal retains preferences and feedback.
+`uninstall --purge-local-data` explicitly deletes product-owned local data and
+backups; it validates dedicated product directories before recursive deletion.
+
+Doctor preserves ambiguous/duplicate shell blocks, artifact symlinks, retargeted
+installations, incompatible endpoints and later conflicting user edits for
+manual review. It never grants data access. Unknown/malformed TOML expressions
+are quarantined when they can be isolated; an ambiguous expression returns an
+error without writing a blanket replacement. Full purge refuses ambiguous
+custom override directories whose ownership boundary cannot be established.
+Repository policy files remain part of their repositories.

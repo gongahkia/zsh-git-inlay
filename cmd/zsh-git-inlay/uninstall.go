@@ -88,6 +88,7 @@ func uninstallCommand(arguments []string) error {
 		return nil
 	}
 	fmt.Println("Removed installed integration. Preferences, feedback and backups are retained.")
+	fmt.Println("Run zsh_git_inlay_unload in the current shell, or open a new Zsh session, to remove its loaded hooks and bindings.")
 	if result.Journal.ID != "" {
 		fmt.Printf("Backup: %s\nUndo: %s undo %s\n", report["backup"], setup.Quote(recovery), result.Journal.ID)
 	}

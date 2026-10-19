@@ -273,7 +273,7 @@ func setupAdmin(operation string, arguments []string, input io.Reader, output io
 		return err
 	}
 	if !*jsonOutput {
-		fmt.Fprintln(output, "Open a new Zsh session to load your integration. Use config show or setup customize to tune preferences.")
+		fmt.Fprintln(output, "Open a new Zsh session to load your integration. Use config show or setup --wizard (customize action) to tune preferences.")
 	}
 	return errors.Join(postErrors...)
 }
