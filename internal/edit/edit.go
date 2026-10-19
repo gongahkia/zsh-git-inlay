@@ -56,6 +56,14 @@ type Store struct {
 // Unlike user-file edits it retains no backup, so bounded feedback/history can
 // actually be cleared. fn runs under a process-wide advisory directory lock.
 func UpdatePrivate(path string, fn func([]byte) ([]byte, error)) error {
+	return UpdatePrivateMode(path, 0o600, fn)
+}
+
+// UpdatePrivateMode also supports retained private recovery executables.
+func UpdatePrivateMode(path string, mode os.FileMode, fn func([]byte) ([]byte, error)) error {
+	if mode != 0o600 && mode != 0o700 {
+		return errors.New("private state mode must be 0600 or 0700")
+	}
 	store := Store{Dir: filepath.Dir(path)}
 	return store.locked(func() error {
 		snapshot, err := Read(path)
@@ -70,7 +78,10 @@ func UpdatePrivate(path string, fn func([]byte) ([]byte, error)) error {
 		if err != nil {
 			return err
 		}
-		return apply(Change{Before: snapshot, Data: data, Mode: 0o600})
+		if len(data) > maxFileBytes {
+			return errors.New("private state exceeds 64 MiB")
+		}
+		return apply(Change{Before: snapshot, Data: data, Mode: mode})
 	})
 }
 
@@ -106,8 +117,11 @@ func Read(path string) (Snapshot, error) {
 		return Snapshot{}, fmt.Errorf("%s is not owned by this user", path)
 	}
 	snapshot.Data, err = io.ReadAll(io.LimitReader(file, maxFileBytes+1))
-	if err != nil || len(snapshot.Data) > maxFileBytes {
+	if err != nil {
 		return Snapshot{}, fmt.Errorf("cannot read bounded file %s: %w", path, err)
+	}
+	if len(snapshot.Data) > maxFileBytes {
+		return Snapshot{}, fmt.Errorf("file %s grew beyond the %d byte limit", path, maxFileBytes)
 	}
 	snapshot.Exists, snapshot.Mode = true, info.Mode().Perm()
 	return snapshot, nil

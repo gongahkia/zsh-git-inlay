@@ -50,10 +50,15 @@ func run(arguments []string) error {
 		return usage()
 	}
 	switch arguments[0] {
+	case "help", "--help", "-h":
+		fmt.Println("zsh-git-inlay prepares grounded commit-message autosuggestions for Zsh.")
+		return setupHelp()
 	case "version":
 		return versionCommand(arguments[1:])
 	case "setup":
 		return setupCommand(arguments[1:])
+	case "uninstall":
+		return uninstallCommand(arguments[1:])
 	case "doctor":
 		return doctor(arguments[1:])
 	case "config":
@@ -107,7 +112,7 @@ func run(arguments []string) error {
 }
 
 func usage() error {
-	return errors.New("usage: zsh-git-inlay {version|setup|doctor|config|status|fingerprint|context|observe|suggest|candidates|explain|evaluate|review|model|permissions|cloud|compose|activity|learning|daemon serve|daemon stop}")
+	return errors.New("usage: zsh-git-inlay {help|version|setup|uninstall|undo|doctor|config|enable|disable|snooze|control status|feedback|status|fingerprint|context|observe|suggest|candidates|explain|evaluate|review|model|permissions|cloud|compose|activity|learning|daemon serve|daemon stop}")
 }
 
 func versionCommand(arguments []string) error {

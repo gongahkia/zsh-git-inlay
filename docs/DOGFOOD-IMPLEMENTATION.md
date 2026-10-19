@@ -17,7 +17,7 @@ the maintainer's actual shell, choose a license, publish, or download models.
 - [x] 3. Typed config show/validate/set/reset/repair: effective/default/source
   information, path/line/key diagnostics, preserve valid settings/comments,
   validate before atomic writes, handle malformed config without blanket reset.
-- [ ] 4. Wizard-exposed customization: providers/budgets, message length,
+- [x] 4. Wizard-exposed customization: providers/budgets, message length,
   capitalization/scopes, candidate count, bindings, and learning. Preferences
   influence generation while grounding remains mandatory.
 - [ ] 5. Global/repository enable-disable and temporary snooze, immediate cached
@@ -73,3 +73,10 @@ before declaring completion.
 - Socket repair now verifies type, owner, private parent, connection refusal and
   unchanged inode. Live sockets, regular files and transient dial failures are
   preserved. This also replaces the daemon's previous any-dial-error cleanup.
+- `setup --wizard` and install/upgrade/customize/repair commands now connect to
+  the engine. Repeated typed `--set` values are validated together; the guided
+  flow reviews choices before writing. Removal retains preferences/backups and
+  a private recovery helper; explicit purge validates dedicated product paths.
+  Isolated CLI tests cover cancellation, reviewed customization, invalid
+  provider batches, idempotent setup, removal, undo, and purge. Race checks pass.
+  Full real-shell lifecycle rehearsal and enhanced doctor remain outstanding.

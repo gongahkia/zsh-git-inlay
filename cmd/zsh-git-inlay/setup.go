@@ -13,6 +13,24 @@ import (
 )
 
 func setupCommand(arguments []string) error {
+	for _, argument := range arguments {
+		if argument == "--help" || argument == "-h" {
+			return setupHelp()
+		}
+	}
+	if len(arguments) > 0 {
+		switch arguments[0] {
+		case "install", "upgrade", "wizard", "customize", "repair":
+			return setupAdmin(arguments[0], arguments[1:], os.Stdin, os.Stdout)
+		case "remove", "uninstall":
+			return uninstallCommand(arguments[1:])
+		}
+		for index, argument := range arguments {
+			if argument == "--wizard" {
+				return setupAdmin("wizard", append(append([]string(nil), arguments[:index]...), arguments[index+1:]...), os.Stdin, os.Stdout)
+			}
+		}
+	}
 	flags, _, jsonOutput := commonFlags("setup")
 	check := flags.Bool("check", false, "check the installed shell integration")
 	demo := flags.Bool("demo", false, "exercise a disposable deterministic staged repository")
@@ -73,4 +91,23 @@ func setupCommand(arguments []string) error {
 		fmt.Printf("Disposable demo: %s\nAccept a suggestion with your normal forward-character/end-of-line binding; cycle with the configured key.\n", suggestion)
 	}
 	return checkErr
+}
+
+func setupHelp() error {
+	fmt.Println(`usage: zsh-git-inlay setup --wizard
+       zsh-git-inlay setup {install|upgrade|customize|repair} [options]
+       zsh-git-inlay setup [--check] [--demo] [--json]
+
+Wizard: guided provider/model, generation budgets, message style/scopes, count,
+key bindings, local learning and backed-up install/repair/removal choices.
+
+Options: --source <built-checkout-or-release> --prefix <directory>
+         --shell-file <startup-file> --autosuggestions <source-file>
+         --set <typed-key=value> (repeat; see config show)
+         --repair-config --repair-files --migrate --adopt
+         --noninteractive --skip-shell-check --json
+
+Inspect: doctor --check; config show; config validate; undo list
+Remove:  uninstall [--purge-local-data] (preferences retained by default)`)
+	return nil
 }
