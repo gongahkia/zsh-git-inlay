@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -25,48 +26,22 @@ func Isolate() (func(), error) {
 		return nil, err
 	}
 	previous := map[string]*string{}
-	set := func(key, value string) error {
+	remember := func(key string) {
+		if _, recorded := previous[key]; recorded {
+			return
+		}
 		if old, ok := os.LookupEnv(key); ok {
 			copy := old
 			previous[key] = &copy
 		} else {
 			previous[key] = nil
 		}
+	}
+	set := func(key, value string) error {
+		remember(key)
 		return os.Setenv(key, value)
 	}
-	for key, value := range compilerPaths {
-		if value != "" {
-			if err := set(key, value); err != nil {
-				os.RemoveAll(root)
-				return nil, err
-			}
-		}
-	}
-	for key, relative := range map[string]string{"HOME": "home", "XDG_CONFIG_HOME": "config", "XDG_DATA_HOME": "data", "XDG_CACHE_HOME": "cache", "XDG_STATE_HOME": "state", "XDG_RUNTIME_DIR": "runtime"} {
-		if err := os.MkdirAll(filepath.Join(root, relative), 0o700); err != nil {
-			os.RemoveAll(root)
-			return nil, err
-		}
-		if err := set(key, filepath.Join(root, relative)); err != nil {
-			os.RemoveAll(root)
-			return nil, err
-		}
-	}
-	for _, key := range []string{"ZDOTDIR", "ZSH_GIT_INLAY_CONFIG", "ZSH_GIT_INLAY_DATA_DIR", "ZSH_GIT_INLAY_CACHE_DIR", "ZSH_GIT_INLAY_STATE_DIR", "ZSH_GIT_INLAY_RUNTIME_DIR", "ZSH_GIT_INLAY_DISABLED", "OPENAI_API_KEY"} {
-		if err := set(key, ""); err != nil {
-			os.RemoveAll(root)
-			return nil, err
-		}
-	}
-	if err := set("GIT_CONFIG_GLOBAL", os.DevNull); err != nil {
-		os.RemoveAll(root)
-		return nil, err
-	}
-	if err := set("GIT_CONFIG_NOSYSTEM", "1"); err != nil {
-		os.RemoveAll(root)
-		return nil, err
-	}
-	return func() {
+	cleanup := func() {
 		for key, value := range previous {
 			if value == nil {
 				_ = os.Unsetenv(key)
@@ -75,5 +50,45 @@ func Isolate() (func(), error) {
 			}
 		}
 		_ = os.RemoveAll(root)
-	}, nil
+	}
+	ready := false
+	defer func() {
+		if !ready {
+			cleanup()
+		}
+	}()
+	// Git's inherited directory/index/object overrides can redirect fixture
+	// writes outside their temporary repositories, even with a private HOME.
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		if strings.HasPrefix(key, "GIT_") || strings.HasPrefix(key, "ZSH_GIT_INLAY_") || key == "ZDOTDIR" || key == "OPENAI_API_KEY" {
+			remember(key)
+			if err := os.Unsetenv(key); err != nil {
+				return nil, err
+			}
+		}
+	}
+	for key, value := range compilerPaths {
+		if value != "" {
+			if err := set(key, value); err != nil {
+				return nil, err
+			}
+		}
+	}
+	for key, relative := range map[string]string{"HOME": "home", "XDG_CONFIG_HOME": "config", "XDG_DATA_HOME": "data", "XDG_CACHE_HOME": "cache", "XDG_STATE_HOME": "state", "XDG_RUNTIME_DIR": "runtime"} {
+		if err := os.MkdirAll(filepath.Join(root, relative), 0o700); err != nil {
+			return nil, err
+		}
+		if err := set(key, filepath.Join(root, relative)); err != nil {
+			return nil, err
+		}
+	}
+	if err := set("GIT_CONFIG_GLOBAL", os.DevNull); err != nil {
+		return nil, err
+	}
+	if err := set("GIT_CONFIG_NOSYSTEM", "1"); err != nil {
+		return nil, err
+	}
+	ready = true
+	return cleanup, nil
 }
