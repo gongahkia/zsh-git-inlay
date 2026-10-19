@@ -10,6 +10,7 @@ import (
 
 	"github.com/gongahkia/zsh-git-inlay/internal/candidate"
 	"github.com/gongahkia/zsh-git-inlay/internal/config"
+	"github.com/gongahkia/zsh-git-inlay/internal/repoctx"
 )
 
 const (
@@ -24,6 +25,8 @@ var (
 )
 
 type Request struct {
+	Evidence           []repoctx.Evidence
+	StagedPatch        string
 	CWD                string
 	Context            string
 	ContextFingerprint string
@@ -63,6 +66,8 @@ type Provider interface {
 
 func New(settings config.Settings) (Provider, error) {
 	switch settings.Provider {
+	case "deterministic-baseline":
+		return Deterministic{Baseline: true}, nil
 	case "deterministic":
 		return Deterministic{}, nil
 	case "ollama":

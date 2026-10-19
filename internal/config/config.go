@@ -177,8 +177,8 @@ func Load() (Settings, error) {
 			return Settings{}, fmt.Errorf("invalid config %s: provider.name must be a string", path)
 		}
 		settings.Provider = unquote(value)
-		if settings.Provider != "deterministic" && settings.Provider != "ollama" && settings.Provider != "openai" {
-			return Settings{}, fmt.Errorf("invalid config %s: provider.name must be deterministic, ollama, or openai", path)
+		if settings.Provider != "deterministic" && settings.Provider != "deterministic-baseline" && settings.Provider != "ollama" && settings.Provider != "openai" {
+			return Settings{}, fmt.Errorf("invalid config %s: provider.name must be deterministic, deterministic-baseline, ollama, or openai", path)
 		}
 	}
 	if value, ok := values["provider.model"]; ok {

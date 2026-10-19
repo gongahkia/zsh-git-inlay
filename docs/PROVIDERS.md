@@ -133,3 +133,12 @@ Successful provider metadata includes API load/prompt/generation durations,
 token counts, and a bounded stop reason. Truncated structured output is rejected
 explicitly; errors omit model text and staged content. These timings diagnose
 runtime behavior; qualification still requires real hardware and human review.
+
+The default deterministic provider now prefers factual staged dependency
+version changes, newly added declarations, and named file/status summaries.
+It reads only the compiler's bounded redacted patch and path evidence; a
+truncated patch contributes no semantic facts. Alternatives remain subject to
+normal grounding and policy. `deterministic-baseline` selects the unchanged
+metadata-template generator globally or with `evaluate --provider
+ deterministic-baseline` for comparisons. Existing frozen reports retain their
+original meaning and are not replaced by results for the new provider.

@@ -24,7 +24,7 @@ const (
 	ContextVersion   = "v2"
 	GroundingVersion = "v1"
 	PolicyVersion    = "v1"
-	GeneratorVersion = "v1-provider-" + config.ProviderPromptVersion + "-context-" + ContextVersion + "-grounding-" + GroundingVersion + "-policy-" + PolicyVersion
+	GeneratorVersion = "v2-facts-provider-" + config.ProviderPromptVersion + "-context-" + ContextVersion + "-grounding-" + GroundingVersion + "-policy-" + PolicyVersion
 )
 
 const maxIndexBytes = 64 * 1024 * 1024

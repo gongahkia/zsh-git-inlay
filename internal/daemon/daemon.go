@@ -586,7 +586,7 @@ func (server *Server) generateCandidates(ctx context.Context, cwd string, expect
 	server.providerMu.RLock()
 	selected, fallback := server.provider, server.fallback
 	server.providerMu.RUnlock()
-	request := provider.Request{CWD: cwd, Context: compiled.Prompt(), ContextFingerprint: compiled.ContextFingerprint}
+	request := provider.Request{CWD: cwd, Context: compiled.Prompt(), ContextFingerprint: compiled.ContextFingerprint, Evidence: compiled.Evidence(), StagedPatch: compiled.StagedPatch()}
 	if provider.IsCloud(selected.Metadata().Name) {
 		if server.cloud == nil {
 			return provider.Response{}, nil, fmt.Errorf("cloud grant storage is unavailable")
@@ -630,7 +630,7 @@ func (server *Server) generateFallback(ctx context.Context, cwd string, compiled
 	if fallback == nil || fallback.Metadata().Name == selectedName {
 		return provider.Response{}, fmt.Errorf("no distinct deterministic fallback is configured")
 	}
-	return fallback.Generate(ctx, provider.Request{CWD: cwd, Context: compiled.Prompt(), ContextFingerprint: compiled.ContextFingerprint})
+	return fallback.Generate(ctx, provider.Request{CWD: cwd, Context: compiled.Prompt(), ContextFingerprint: compiled.ContextFingerprint, Evidence: compiled.Evidence(), StagedPatch: compiled.StagedPatch()})
 }
 
 func (server *Server) cloudAllowed(provenance CloudProvenance) bool {

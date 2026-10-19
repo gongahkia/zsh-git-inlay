@@ -9,10 +9,16 @@ import (
 	"github.com/gongahkia/zsh-git-inlay/internal/config"
 )
 
-type Deterministic struct{}
+type Deterministic struct{ Baseline bool }
 
-func (Deterministic) Metadata() Metadata {
-	return Metadata{Name: "deterministic", Model: "metadata-template", Quantization: "not_applicable", Runtime: "builtin", PromptVersion: config.ProviderPromptVersion, Settings: map[string]string{"staged_metadata_limit": fmt.Sprint(candidate.MaxMetadata)}}
+func (deterministic Deterministic) Metadata() Metadata {
+	model := "staged-facts-v1"
+	name := "deterministic"
+	if deterministic.Baseline {
+		model = "metadata-template"
+		name = "deterministic-baseline"
+	}
+	return Metadata{Name: name, Model: model, Quantization: "not_applicable", Runtime: "builtin", PromptVersion: config.ProviderPromptVersion, Settings: map[string]string{"staged_metadata_limit": fmt.Sprint(candidate.MaxMetadata)}}
 }
 
 func (deterministic Deterministic) Generate(ctx context.Context, request Request) (Response, error) {
@@ -27,6 +33,9 @@ func (deterministic Deterministic) Generate(ctx context.Context, request Request
 			return Response{}, fmt.Errorf("parse deterministic candidate")
 		}
 		result.Candidates = append(result.Candidates, Candidate{Type: typeName, Scope: scope, Subject: subject, EvidenceIDs: []string{"metadata:staged"}})
+	}
+	if !deterministic.Baseline {
+		result.Candidates = factualCandidates(request.Evidence, request.StagedPatch, result.Candidates)
 	}
 	return result, nil
 }

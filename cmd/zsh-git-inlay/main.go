@@ -440,11 +440,13 @@ func evaluateCommand(arguments []string) error {
 		err       error
 	)
 	switch *provider {
-	case "deterministic":
+	case "deterministic", "deterministic-baseline":
 		if *model != "" {
 			return errors.New("--model requires --provider ollama")
 		}
-		generator, err = evaluation.NewDeterministicDaemonGenerator()
+		settings := config.Default()
+		settings.Provider = *provider
+		generator, err = evaluation.NewDaemonGenerator(settings)
 		if err != nil {
 			return err
 		}

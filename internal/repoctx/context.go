@@ -45,7 +45,7 @@ type Budget struct {
 }
 
 func budgetFor(provider string) (Budget, error) {
-	if provider != "deterministic" && provider != "ollama" && provider != "openai" {
+	if provider != "deterministic" && provider != "deterministic-baseline" && provider != "ollama" && provider != "openai" {
 		return Budget{}, fmt.Errorf("unsupported context provider %q", provider)
 	}
 	budget := Budget{
@@ -100,6 +100,16 @@ type Compiled struct {
 }
 
 func (compiled Compiled) Prompt() string { return compiled.prompt }
+
+// StagedPatch returns only the bounded, redacted patch compiled in the daemon.
+func (compiled Compiled) StagedPatch() string {
+	for _, source := range compiled.Sources {
+		if source.Name == "staged_patch" && source.Included && !source.Truncated {
+			return source.content
+		}
+	}
+	return ""
+}
 
 // CloudContext is an inspectable transmission selection. It never exposes
 // source content through JSON, but Prompt contains only sources selected by a
