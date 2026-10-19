@@ -57,3 +57,9 @@ before declaring completion.
   expire, and explicit usefulness labels contain only scoped hashes. Feedback
   retention is bounded and clearing leaves no backup copy. Integration rehearsal
   and doctor/wizard exposure remain to be completed.
+- Lifecycle engine manages manifest-recorded files and exactly one shell block,
+  preserves symlinked dotfiles, migrates literal legacy source lines only when
+  requested, verifies artifact hashes/targets, refuses artifact symlinks, and
+  supports idempotent install/upgrade/uninstall. Marked-block undo preserves
+  unrelated later edits; interrupted merged undo also recovers. Race-tested the
+  engine; installation/removal wizard and interactive-shell doctor are next.

@@ -165,3 +165,34 @@ func TestRetargetedOrDanglingSymlinkRejected(t *testing.T) {
 		t.Fatal("dangling symlink accepted")
 	}
 }
+
+func TestInterruptedMergedUndoRecoversWithoutLosingLaterEdits(t *testing.T) {
+	dir := t.TempDir()
+	first, second := filepath.Join(dir, "shell"), filepath.Join(dir, "binary")
+	write(t, first, "original\n")
+	store := Store{Dir: filepath.Join(dir, "journal")}
+	journal, err := store.Apply("install", []Change{{Before: read(t, first), Data: []byte("original\nmanaged\n")}, {Before: read(t, second), Data: []byte("binary")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, first, "original\nmanaged\nlater edit\n")
+	journal.State = "undoing"
+	journal.UndoChanges = []Change{{Before: read(t, first), Data: []byte("original\nlater edit\n"), Mode: 0o640}, {Before: read(t, second), Remove: true}}
+	if err := store.locked(func() error {
+		if err := store.save(journal); err != nil {
+			return err
+		}
+		return apply(journal.UndoChanges[0])
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Recover(); err != nil {
+		t.Fatal(err)
+	}
+	if string(read(t, first).Data) != "original\nlater edit\n" || read(t, second).Exists {
+		t.Fatal("recovery lost later edits or left partial undo")
+	}
+	if _, err := store.Undo(journal.ID); err != nil {
+		t.Fatal(err)
+	}
+}

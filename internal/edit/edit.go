@@ -29,18 +29,20 @@ type Snapshot struct {
 }
 
 type Change struct {
-	Before Snapshot    `json:"before"`
-	Data   []byte      `json:"data,omitempty"`
-	Mode   os.FileMode `json:"mode"`
-	Remove bool        `json:"remove,omitempty"`
+	Before       Snapshot    `json:"before"`
+	Data         []byte      `json:"data,omitempty"`
+	Mode         os.FileMode `json:"mode"`
+	Remove       bool        `json:"remove,omitempty"`
+	ManagedBlock bool        `json:"managed_block,omitempty"`
 }
 
 type Journal struct {
-	ID      string    `json:"id"`
-	Label   string    `json:"label"`
-	Created time.Time `json:"created"`
-	State   string    `json:"state"`
-	Changes []Change  `json:"changes"`
+	ID          string    `json:"id"`
+	Label       string    `json:"label"`
+	Created     time.Time `json:"created"`
+	State       string    `json:"state"`
+	Changes     []Change  `json:"changes"`
+	UndoChanges []Change  `json:"undo_changes,omitempty"`
 }
 
 type Store struct {
@@ -141,7 +143,12 @@ func (store Store) Apply(label string, changes []Change) (Journal, error) {
 			return err
 		}
 		seen := map[string]bool{}
+		total := 0
 		for _, change := range changes {
+			total += len(change.Before.Data) + len(change.Data)
+			if total > 64<<20 || len(changes) > 128 {
+				return errors.New("transaction exceeds the 64 MiB / 128 file backup limit")
+			}
 			if seen[change.Before.Target] || len(change.Data) > maxFileBytes {
 				return fmt.Errorf("duplicate target or oversized change: %s", change.Before.Path)
 			}
@@ -180,6 +187,13 @@ func (store Store) Apply(label string, changes []Change) (Journal, error) {
 }
 
 func (store Store) Undo(id string) (Journal, error) {
+	return store.UndoWith(id, nil)
+}
+
+// UndoWith permits a caller to merge only its own marked region when an
+// unrelated part of a user file has changed. Original backups are retained.
+// The merged reverse transaction is journalled before any restoration starts.
+func (store Store) UndoWith(id string, merge func(Change, Snapshot) (Change, error)) (Journal, error) {
 	var result Journal
 	err := store.locked(func() error {
 		if err := store.recover(); err != nil {
@@ -198,16 +212,36 @@ func (store Store) Undo(id string) (Journal, error) {
 		}
 		// Check the entire transaction first. An edit in any file prevents a
 		// partial undo; the backup remains available for manual reconciliation.
+		total := 0
 		for _, change := range journal.Changes {
-			if err := matches(after(change)); err != nil {
-				return fmt.Errorf("cannot undo %s; later edits are preserved: %w", id, err)
+			current, err := Read(change.Before.Path)
+			if err != nil {
+				return err
+			}
+			reverse := Change{Before: current, Data: change.Before.Data, Mode: change.Before.Mode, Remove: !change.Before.Exists}
+			if conflict := matches(after(change)); conflict != nil {
+				if merge == nil {
+					return fmt.Errorf("cannot undo %s; later edits are preserved: %w", id, conflict)
+				}
+				reverse, err = merge(change, current)
+				if err != nil {
+					return fmt.Errorf("cannot undo %s; later edits are preserved: %w", id, err)
+				}
+				if reverse.Before.Path != current.Path || reverse.Before.Target != current.Target || len(reverse.Data) > maxFileBytes {
+					return errors.New("undo merge changed its target or exceeded the file limit")
+				}
+			}
+			journal.UndoChanges = append(journal.UndoChanges, reverse)
+			total += len(reverse.Before.Data) + len(reverse.Data)
+			if total > 64<<20 {
+				return errors.New("merged undo exceeds the 64 MiB backup limit; no files changed")
 			}
 		}
 		journal.State = "undoing"
 		if err := store.save(journal); err != nil {
 			return err
 		}
-		err = store.rollback(&journal)
+		err = store.finishUndo(&journal)
 		result = journal
 		return err
 	})
@@ -253,12 +287,38 @@ func (store Store) recover() error {
 			return err
 		}
 		if journal.State == "prepared" || journal.State == "undoing" {
-			if err := store.rollback(&journal); err != nil {
-				return fmt.Errorf("recover transaction %s from %s: %w", journal.ID, store.Dir, err)
+			var recoveryErr error
+			if journal.State == "undoing" && len(journal.UndoChanges) > 0 {
+				recoveryErr = store.finishUndo(&journal)
+			} else {
+				recoveryErr = store.rollback(&journal)
+			}
+			if recoveryErr != nil {
+				return fmt.Errorf("recover transaction %s from %s: %w", journal.ID, store.Dir, recoveryErr)
 			}
 		}
 	}
 	return nil
+}
+
+func (store Store) finishUndo(journal *Journal) error {
+	for _, reverse := range journal.UndoChanges {
+		if matches(after(reverse)) != nil {
+			if err := matches(reverse.Before); err != nil {
+				return fmt.Errorf("undo recovery conflict in %s: %w", journal.ID, err)
+			}
+		}
+	}
+	for _, reverse := range journal.UndoChanges {
+		if matches(after(reverse)) == nil {
+			continue
+		}
+		if err := apply(reverse); err != nil {
+			return err
+		}
+	}
+	journal.State = "undone"
+	return store.save(*journal)
 }
 
 func (store Store) rollback(journal *Journal) error {

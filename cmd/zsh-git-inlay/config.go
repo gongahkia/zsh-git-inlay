@@ -12,6 +12,7 @@ import (
 
 	"github.com/gongahkia/zsh-git-inlay/internal/config"
 	"github.com/gongahkia/zsh-git-inlay/internal/edit"
+	"github.com/gongahkia/zsh-git-inlay/internal/lifecycle"
 	runtimepath "github.com/gongahkia/zsh-git-inlay/internal/runtime"
 )
 
@@ -166,7 +167,7 @@ func undoCommand(arguments []string) error {
 		}
 		return nil
 	}
-	journal, err := store.Undo(arguments[0])
+	journal, err := store.UndoWith(arguments[0], lifecycle.MergeUndo)
 	if err != nil {
 		return err
 	}
