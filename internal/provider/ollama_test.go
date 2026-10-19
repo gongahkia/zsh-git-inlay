@@ -3,11 +3,14 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"github.com/gongahkia/zsh-git-inlay/internal/config"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -26,7 +29,7 @@ func TestOllamaListsShowsAndGeneratesStructuredCandidates(t *testing.T) {
 				t.Errorf("decode request: %v", err)
 				return
 			}
-			if body["stream"] != false || body["format"] == nil || body["keep_alive"] != "5m" {
+			if body["stream"] != false || body["format"] == nil || body["keep_alive"] != "5m0s" {
 				t.Errorf("unbounded generation request: %#v", body)
 			}
 			_, _ = writer.Write([]byte(`{"model":"qwen2.5-coder:0.5b","done":true,"response":"{\"candidates\":[{\"type\":\"chore\",\"scope\":\"repo\",\"subject\":\"update staged files\",\"evidence_ids\":[\"change:0\"]}]}"}`))
@@ -134,5 +137,81 @@ func providerGit(t *testing.T, cwd string, arguments ...string) {
 	command := exec.Command("git", append([]string{"-C", cwd}, arguments...)...)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", arguments, err, output)
+	}
+}
+
+func TestOllamaConfiguredBudgetsAndGenerationMetrics(t *testing.T) {
+	var truncated bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/generate" {
+			_, _ = w.Write([]byte(`{"details":{}}`))
+			return
+		}
+		var body struct {
+			Options   map[string]int `json:"options"`
+			KeepAlive string         `json:"keep_alive"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		if body.Options["num_ctx"] != 8192 || body.Options["num_predict"] != 512 || body.KeepAlive != "0s" {
+			t.Errorf("settings not applied: %#v", body)
+		}
+		reason := "stop"
+		if truncated {
+			reason = "length"
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"done": true, "done_reason": reason, "load_duration": 120, "prompt_eval_count": 20, "eval_count": 30, "response": `{"candidates":[{"type":"chore","subject":"update files","evidence_ids":["change:0"]}]}`})
+	}))
+	defer server.Close()
+	settings := config.Default()
+	settings.ProviderModel = "fixture"
+	settings.OllamaContextTokens = 8192
+	settings.OllamaOutputTokens = 512
+	settings.OllamaKeepAlive = 0
+	backend, err := NewConfiguredOllama(server.URL, settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := Request{Context: "private staged input"}
+	response, err := backend.Generate(context.Background(), request)
+	if err != nil || response.Metadata.Generation == nil || response.Metadata.Generation.LoadDuration != 120 || response.Metadata.Generation.EvalCount != 30 {
+		t.Fatalf("response=%#v err=%v", response, err)
+	}
+	truncated = true
+	_, err = backend.Generate(context.Background(), request)
+	var failure *GenerationError
+	if !errors.As(err, &failure) || failure.Kind != "output_truncated" || strings.Contains(err.Error(), "private staged input") {
+		t.Fatalf("failure=%v", err)
+	}
+}
+
+func TestOllamaColdAndWarmTimeouts(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/generate" {
+			_, _ = w.Write([]byte(`{"details":{}}`))
+			return
+		}
+		select {
+		case <-time.After(50 * time.Millisecond):
+		case <-r.Context().Done():
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"done": true, "response": `{"candidates":[{"type":"chore","subject":"update files","evidence_ids":["change:0"]}]}`})
+	}))
+	defer server.Close()
+	settings := config.Default()
+	settings.ProviderModel = "fixture"
+	settings.ProviderTimeout = 10 * time.Millisecond
+	settings.OllamaColdTimeout = time.Second
+	backend, err := NewConfiguredOllama(server.URL, settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := backend.Generate(context.Background(), Request{Context: "fixture"}); err != nil {
+		t.Fatalf("cold request: %v", err)
+	}
+	if _, err := backend.Generate(context.Background(), Request{Context: "fixture"}); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("warm timeout: %v", err)
 	}
 }

@@ -17,7 +17,7 @@ var policyName = regexp.MustCompile(`^[a-z][a-z0-9._/-]{0,39}$`)
 
 const (
 	DefaultIdleTimeout    = 15 * time.Minute
-	ProviderPromptVersion = "v1"
+	ProviderPromptVersion = "v2"
 )
 
 const (
@@ -27,42 +27,50 @@ const (
 )
 
 type Settings struct {
-	IdleTimeout       time.Duration
-	MaxRepositories   int
-	MaxGenerationJobs int
-	CacheMaxRecords   int
-	CacheMaxBytes     int64
-	CacheMaxAge       time.Duration
-	Provider          string
-	ProviderModel     string
-	ProviderTimeout   time.Duration
-	ProviderFallback  string
-	GroundingPolicy   string
-	ActivityRetention time.Duration
-	ActivityMaxEvents int
-	CycleKeybinding   string
-	CycleKeymaps      []string
-	Verbose           bool
-	Version           string
+	IdleTimeout         time.Duration
+	MaxRepositories     int
+	MaxGenerationJobs   int
+	CacheMaxRecords     int
+	CacheMaxBytes       int64
+	CacheMaxAge         time.Duration
+	Provider            string
+	ProviderModel       string
+	ProviderTimeout     time.Duration
+	OllamaContextTokens int
+	OllamaOutputTokens  int
+	OllamaKeepAlive     time.Duration
+	OllamaColdTimeout   time.Duration
+	ProviderFallback    string
+	GroundingPolicy     string
+	ActivityRetention   time.Duration
+	ActivityMaxEvents   int
+	CycleKeybinding     string
+	CycleKeymaps        []string
+	Verbose             bool
+	Version             string
 }
 
 func Default() Settings {
 	return Settings{
-		IdleTimeout:       DefaultIdleTimeout,
-		MaxRepositories:   32,
-		MaxGenerationJobs: 2,
-		CacheMaxRecords:   DefaultCacheMaxRecords,
-		CacheMaxBytes:     DefaultCacheMaxBytes,
-		CacheMaxAge:       DefaultCacheMaxAge,
-		Provider:          "deterministic",
-		ProviderTimeout:   8 * time.Second,
-		ProviderFallback:  "deterministic",
-		GroundingPolicy:   "conservative",
-		ActivityRetention: 30 * time.Minute,
-		ActivityMaxEvents: 256,
-		CycleKeybinding:   "^Xg",
-		CycleKeymaps:      []string{"emacs", "viins"},
-		Version:           "default",
+		IdleTimeout:         DefaultIdleTimeout,
+		MaxRepositories:     32,
+		MaxGenerationJobs:   2,
+		CacheMaxRecords:     DefaultCacheMaxRecords,
+		CacheMaxBytes:       DefaultCacheMaxBytes,
+		CacheMaxAge:         DefaultCacheMaxAge,
+		Provider:            "deterministic",
+		ProviderTimeout:     8 * time.Second,
+		OllamaContextTokens: 4096,
+		OllamaOutputTokens:  256,
+		OllamaKeepAlive:     5 * time.Minute,
+		OllamaColdTimeout:   30 * time.Second,
+		ProviderFallback:    "deterministic",
+		GroundingPolicy:     "conservative",
+		ActivityRetention:   30 * time.Minute,
+		ActivityMaxEvents:   256,
+		CycleKeybinding:     "^Xg",
+		CycleKeymaps:        []string{"emacs", "viins"},
+		Version:             "default",
 	}
 }
 
@@ -106,6 +114,10 @@ func Load() (Settings, error) {
 		"provider.name":                     true,
 		"provider.model":                    true,
 		"provider.timeout":                  true,
+		"ollama.context_tokens":             true,
+		"ollama.output_tokens":              true,
+		"ollama.keep_alive":                 true,
+		"ollama.cold_timeout":               true,
 		"provider.fallback":                 true,
 		"grounding.ambiguity":               true,
 		"activity.retention":                true,
@@ -185,6 +197,35 @@ func Load() (Settings, error) {
 		settings.ProviderTimeout, err = time.ParseDuration(unquote(value))
 		if err != nil || settings.ProviderTimeout < time.Second || settings.ProviderTimeout > time.Minute {
 			return Settings{}, fmt.Errorf("invalid config %s: provider.timeout must be 1s..1m", path)
+		}
+	}
+	for key, target := range map[string]*int{"ollama.context_tokens": &settings.OllamaContextTokens, "ollama.output_tokens": &settings.OllamaOutputTokens} {
+		if value, ok := values[key]; ok {
+			parsed, parseErr := strconv.Atoi(value)
+			minimum, maximum := 1024, 32768
+			if key == "ollama.output_tokens" {
+				minimum, maximum = 64, 2048
+			}
+			if parseErr != nil || parsed < minimum || parsed > maximum {
+				return Settings{}, fmt.Errorf("%s must be %d..%d", key, minimum, maximum)
+			}
+			*target = parsed
+		}
+	}
+	for key, target := range map[string]*time.Duration{"ollama.keep_alive": &settings.OllamaKeepAlive, "ollama.cold_timeout": &settings.OllamaColdTimeout} {
+		if value, ok := values[key]; ok {
+			if !quoted(value) {
+				return Settings{}, fmt.Errorf("%s must be a string duration", key)
+			}
+			parsed, parseErr := time.ParseDuration(unquote(value))
+			minimum, maximum := time.Duration(0), 30*time.Minute
+			if key == "ollama.cold_timeout" {
+				minimum, maximum = time.Second, 2*time.Minute
+			}
+			if parseErr != nil || parsed < minimum || parsed > maximum {
+				return Settings{}, fmt.Errorf("%s duration out of bounds", key)
+			}
+			*target = parsed
 		}
 	}
 	if value, ok := values["provider.fallback"]; ok {

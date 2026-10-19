@@ -42,12 +42,13 @@ type Candidate struct {
 }
 
 type Metadata struct {
-	Name          string            `json:"name"`
-	Model         string            `json:"model"`
-	Quantization  string            `json:"quantization"`
-	Runtime       string            `json:"runtime"`
-	PromptVersion string            `json:"prompt_version"`
-	Settings      map[string]string `json:"settings,omitempty"`
+	Name          string             `json:"name"`
+	Model         string             `json:"model"`
+	Quantization  string             `json:"quantization"`
+	Runtime       string             `json:"runtime"`
+	PromptVersion string             `json:"prompt_version"`
+	Settings      map[string]string  `json:"settings,omitempty"`
+	Generation    *GenerationMetrics `json:"generation,omitempty"`
 }
 
 type Response struct {
@@ -65,7 +66,7 @@ func New(settings config.Settings) (Provider, error) {
 	case "deterministic":
 		return Deterministic{}, nil
 	case "ollama":
-		return NewOllama(DefaultOllamaURL, settings.ProviderModel, settings.ProviderTimeout)
+		return NewConfiguredOllama(DefaultOllamaURL, settings)
 	case "openai":
 		return NewOpenAI(settings.ProviderModel, settings.ProviderTimeout)
 	default:

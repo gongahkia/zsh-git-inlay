@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -107,6 +108,21 @@ func TestCycleKeymaps(t *testing.T) {
 		}
 		_, err := Load()
 		valid := value == `["emacs", "viins"]` || value == `["vicmd"]`
+		if (err == nil) != valid {
+			t.Fatalf("%s: %v", value, err)
+		}
+	}
+}
+
+func TestOllamaBudgetValidation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	t.Setenv("ZSH_GIT_INLAY_CONFIG", path)
+	for _, value := range []string{`context_tokens = 8192`, `output_tokens = 512`, `keep_alive = "0s"`, `cold_timeout = "45s"`, `context_tokens = 1`, `output_tokens = 0`, `keep_alive = "-1s"`, `cold_timeout = "5m"`} {
+		if err := os.WriteFile(path, []byte("[ollama]\n"+value), 0600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := Load()
+		valid := strings.Contains(value, "8192") || strings.Contains(value, "512") || strings.Contains(value, `"0s"`) || strings.Contains(value, `"45s"`)
 		if (err == nil) != valid {
 			t.Fatalf("%s: %v", value, err)
 		}

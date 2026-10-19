@@ -120,3 +120,16 @@ See [its license](https://github.com/ggml-org/llama.cpp/blob/master/LICENSE) and
 Consequently `model install --confirm` reports that blocker without downloading.
 Mock fixtures verify the acquisition mechanics; they are not a claim that a
 production runtime/model distribution is available.
+
+## Local generation budgets
+
+The optional `[ollama]` section accepts `context_tokens` (1024–32768, default
+4096), `output_tokens` (64–2048, default 256), `keep_alive` (0s–30m, default
+5m), and `cold_timeout` (1s–2m, default 30s). `[provider] timeout` remains the
+warm deadline. An expired keep-alive uses the cold deadline; caller cancellation
+and evaluation deadlines still take precedence. No model is loaded at setup.
+
+Successful provider metadata includes API load/prompt/generation durations,
+token counts, and a bounded stop reason. Truncated structured output is rejected
+explicitly; errors omit model text and staged content. These timings diagnose
+runtime behavior; qualification still requires real hardware and human review.
