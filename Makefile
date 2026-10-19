@@ -21,6 +21,7 @@ test-go:
 	$(GO) test ./...
 
 test-zsh: build
+	ZSH_GIT_INLAY_BIN=$(abspath $(BINARY)) zsh tests/shell-contract.zsh
 	ZSH_GIT_INLAY_BIN=$(abspath $(BINARY)) zsh tests/integration.zsh
 	ZSH_GIT_INLAY_BIN=$(abspath $(BINARY)) zsh tests/reliability.zsh
 
@@ -65,7 +66,7 @@ fuzz:
 lint:
 	$(GO) vet ./...
 	test -z "$$($(GO)fmt -l $$(find cmd internal -name '*.go' -print))"
-	zsh -n zsh-git-inlay.plugin.zsh tests/integration.zsh tests/reliability.zsh tests/evaluation.zsh tests/install.zsh tests/dogfood.zsh tests/soak.zsh tests/live-ollama.zsh
+	zsh -n tests/shell-contract.zsh zsh-git-inlay.plugin.zsh tests/integration.zsh tests/reliability.zsh tests/evaluation.zsh tests/install.zsh tests/dogfood.zsh tests/soak.zsh tests/live-ollama.zsh
 	sh -n scripts/install.sh scripts/install-release.sh scripts/uninstall.sh scripts/checksums.sh scripts/sbom.sh scripts/release-snapshot.sh
 	! rg -n '\beval\b|function[[:space:]]+git\b' zsh-git-inlay.plugin.zsh cmd internal
 

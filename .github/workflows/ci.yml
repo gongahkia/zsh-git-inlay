@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: '23 3 * * 1'
 
 permissions:
   contents: read
@@ -17,6 +19,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
+    env:
+      TMPDIR: /tmp
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
@@ -32,6 +36,10 @@ jobs:
           brew install zsh zsh-autosuggestions
           echo "ZSH_AUTOSUGGESTIONS_SOURCE=$(brew --prefix zsh-autosuggestions)/share/zsh-autosuggestions/zsh-autosuggestions.zsh" >> "$GITHUB_ENV"
       - run: make test lint
+      - run: go test -race ./...
+      - name: bounded fuzz regression
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: make fuzz FUZZ_TIME=10s
 
   snapshot:
     name: release snapshot

@@ -276,14 +276,18 @@ func suggestStatus(jsonOutput bool, status string) error {
 }
 
 func configCommand(arguments []string) error {
-	if len(arguments) != 1 || arguments[0] != "cycle-keybinding" {
-		return errors.New("usage: zsh-git-inlay config cycle-keybinding")
+	if len(arguments) != 1 || (arguments[0] != "cycle-keybinding" && arguments[0] != "cycle-keymaps") {
+		return errors.New("usage: zsh-git-inlay config {cycle-keybinding|cycle-keymaps}")
 	}
 	settings, err := config.Load()
 	if err != nil {
 		return err
 	}
-	fmt.Println(settings.CycleKeybinding)
+	if arguments[0] == "cycle-keymaps" {
+		fmt.Println(strings.Join(settings.CycleKeymaps, "\n"))
+	} else {
+		fmt.Println(settings.CycleKeybinding)
+	}
 	return nil
 }
 

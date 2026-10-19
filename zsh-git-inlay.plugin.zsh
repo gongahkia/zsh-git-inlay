@@ -6,14 +6,34 @@ if (( ! ${+functions[_zsh_autosuggest_fetch_suggestion]} )); then
   return 0
 fi
 
+if (( ${+_ZSH_GIT_INLAY_LOADED} )); then
+  return 0
+fi
+typeset -g _ZSH_GIT_INLAY_LOADED=1
+
 typeset -g ZSH_GIT_INLAY_CYCLE=${ZSH_GIT_INLAY_CYCLE:-0}
 if (( ! ${+ZSH_GIT_INLAY_CYCLE_KEYBINDING} )); then
   ZSH_GIT_INLAY_CYCLE_KEYBINDING="$(command zsh-git-inlay config cycle-keybinding 2>/dev/null || true)"
   [[ -n $ZSH_GIT_INLAY_CYCLE_KEYBINDING ]] || ZSH_GIT_INLAY_CYCLE_KEYBINDING='^Xg'
 fi
 
+if (( ! ${+ZSH_GIT_INLAY_CYCLE_KEYMAPS} )); then
+  typeset -ga ZSH_GIT_INLAY_CYCLE_KEYMAPS
+  ZSH_GIT_INLAY_CYCLE_KEYMAPS=("${(@f)$(command zsh-git-inlay config cycle-keymaps 2>/dev/null)}")
+  [[ -n ${ZSH_GIT_INLAY_CYCLE_KEYMAPS[1]:-} ]] || ZSH_GIT_INLAY_CYCLE_KEYMAPS=(emacs viins)
+fi
+
+# Only prefilter obvious unrelated commands; Go owns the authoritative parser.
+_zsh_git_inlay_maybe_commit() {
+  emulate -L zsh
+  setopt extendedglob
+  local text=${1##[[:space:]]#}
+  [[ $text == git[[:space:]]* || $text == command[[:space:]]* ]]
+}
+
 _zsh_autosuggest_strategy_git-inlay() {
   emulate -L zsh
+  _zsh_git_inlay_maybe_commit "$1" || return 0
   local -a arguments
   arguments=(suggest --cwd "$PWD" --buffer "$1" --cycle "${ZSH_GIT_INLAY_CYCLE:-0}")
   [[ ${ZSH_GIT_INLAY_CYCLING:-0} == 1 ]] && arguments+=(--no-start)
@@ -125,12 +145,16 @@ _zsh_git_inlay_cycle_widget() {
 _zsh_git_inlay_bind_cycle() {
   [[ ${ZSH_GIT_INLAY_CYCLE_KEYBINDING:-} == 'none' ]] && return 0
   [[ -n ${ZSH_GIT_INLAY_CYCLE_KEYBINDING:-} ]] || return 0
-  local binding
-  binding="$(bindkey -M emacs "$ZSH_GIT_INLAY_CYCLE_KEYBINDING" 2>/dev/null)"
+  typeset -gA _ZSH_GIT_INLAY_CYCLE_ORIGINAL_WIDGETS
+  local binding keymap
   typeset -g _ZSH_GIT_INLAY_CYCLE_KEY="$ZSH_GIT_INLAY_CYCLE_KEYBINDING"
-  typeset -g _ZSH_GIT_INLAY_CYCLE_ORIGINAL_WIDGET="${binding##* }"
   zle -N zsh-git-inlay-cycle _zsh_git_inlay_cycle_widget
-  bindkey -M emacs "$ZSH_GIT_INLAY_CYCLE_KEYBINDING" zsh-git-inlay-cycle
+  for keymap in "${ZSH_GIT_INLAY_CYCLE_KEYMAPS[@]}"; do
+    [[ $keymap == emacs || $keymap == viins || $keymap == vicmd ]] || continue
+    binding="$(bindkey -M "$keymap" "$ZSH_GIT_INLAY_CYCLE_KEYBINDING" 2>/dev/null)" || continue
+    _ZSH_GIT_INLAY_CYCLE_ORIGINAL_WIDGETS[$keymap]="${binding##* }"
+    bindkey -M "$keymap" "$ZSH_GIT_INLAY_CYCLE_KEYBINDING" zsh-git-inlay-cycle
+  done
 }
 
 zsh_git_inlay_unload() {
@@ -139,12 +163,16 @@ zsh_git_inlay_unload() {
   add-zsh-hook -d precmd _zsh_git_inlay_observe
   add-zsh-hook -d preexec _zsh_git_inlay_activity_preexec
   ZSH_AUTOSUGGEST_STRATEGY=(${ZSH_AUTOSUGGEST_STRATEGY:#git-inlay})
-  if [[ -n ${_ZSH_GIT_INLAY_CYCLE_KEY:-} && -n ${_ZSH_GIT_INLAY_CYCLE_ORIGINAL_WIDGET:-} ]]; then
-    bindkey -M emacs "$_ZSH_GIT_INLAY_CYCLE_KEY" "$_ZSH_GIT_INLAY_CYCLE_ORIGINAL_WIDGET"
+  if [[ -n ${_ZSH_GIT_INLAY_CYCLE_KEY:-} ]]; then
+    local keymap
+    for keymap in "${(@k)_ZSH_GIT_INLAY_CYCLE_ORIGINAL_WIDGETS}"; do
+      bindkey -M "$keymap" "$_ZSH_GIT_INLAY_CYCLE_KEY" "${_ZSH_GIT_INLAY_CYCLE_ORIGINAL_WIDGETS[$keymap]}"
+    done
   fi
+  unset _ZSH_GIT_INLAY_LOADED _ZSH_GIT_INLAY_CYCLE_ORIGINAL_WIDGETS _ZSH_GIT_INLAY_CYCLE_KEY
   zle -D zsh-git-inlay-cycle 2>/dev/null
   unset ZSH_GIT_INLAY_ACTIVITY_CLASS ZSH_GIT_INLAY_ACTIVITY_STARTED ZSH_GIT_INLAY_ACTIVITY_GIT_COMMIT ZSH_GIT_INLAY_LEARNING_COMMIT
-  unfunction _zsh_autosuggest_strategy_git-inlay _zsh_git_inlay_activity_classify _zsh_git_inlay_activity_emit _zsh_git_inlay_activity_preexec _zsh_git_inlay_learning_prepare _zsh_git_inlay_learning_commit _zsh_git_inlay_activity_finish _zsh_git_inlay_activity_git_state _zsh_git_inlay_observe _zsh_git_inlay_commit_context _zsh_git_inlay_cycle_widget _zsh_git_inlay_bind_cycle
+  unfunction _zsh_git_inlay_maybe_commit _zsh_autosuggest_strategy_git-inlay _zsh_git_inlay_activity_classify _zsh_git_inlay_activity_emit _zsh_git_inlay_activity_preexec _zsh_git_inlay_learning_prepare _zsh_git_inlay_learning_commit _zsh_git_inlay_activity_finish _zsh_git_inlay_activity_git_state _zsh_git_inlay_observe _zsh_git_inlay_commit_context _zsh_git_inlay_cycle_widget _zsh_git_inlay_bind_cycle
 }
 
 ZSH_AUTOSUGGEST_STRATEGY=(git-inlay "${ZSH_AUTOSUGGEST_STRATEGY[@]}")

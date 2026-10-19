@@ -97,3 +97,18 @@ func TestRepositoryConfigRejectsCapabilities(t *testing.T) {
 		}
 	}
 }
+
+func TestCycleKeymaps(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	t.Setenv("ZSH_GIT_INLAY_CONFIG", path)
+	for _, value := range []string{`["emacs", "viins"]`, `["vicmd"]`, `[]`, `["main"]`, `["viins", "viins"]`, `"viins"`} {
+		if err := os.WriteFile(path, []byte("[zsh]\ncycle_keymaps = "+value), 0600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := Load()
+		valid := value == `["emacs", "viins"]` || value == `["vicmd"]`
+		if (err == nil) != valid {
+			t.Fatalf("%s: %v", value, err)
+		}
+	}
+}

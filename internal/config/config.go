@@ -41,6 +41,7 @@ type Settings struct {
 	ActivityRetention time.Duration
 	ActivityMaxEvents int
 	CycleKeybinding   string
+	CycleKeymaps      []string
 	Verbose           bool
 	Version           string
 }
@@ -60,6 +61,7 @@ func Default() Settings {
 		ActivityRetention: 30 * time.Minute,
 		ActivityMaxEvents: 256,
 		CycleKeybinding:   "^Xg",
+		CycleKeymaps:      []string{"emacs", "viins"},
 		Version:           "default",
 	}
 }
@@ -109,6 +111,7 @@ func Load() (Settings, error) {
 		"activity.retention":                true,
 		"activity.max_events":               true,
 		"zsh.cycle_keybinding":              true,
+		"zsh.cycle_keymaps":                 true,
 		"diagnostics.verbose":               true,
 	})
 	_ = section
@@ -230,6 +233,19 @@ func Load() (Settings, error) {
 		settings.CycleKeybinding = unquote(value)
 		if settings.CycleKeybinding == "" {
 			return Settings{}, fmt.Errorf("invalid config %s: zsh.cycle_keybinding may not be empty", path)
+		}
+	}
+	if value, ok := values["zsh.cycle_keymaps"]; ok {
+		settings.CycleKeymaps, err = policyArray(value, "zsh.cycle_keymaps")
+		if err != nil || len(settings.CycleKeymaps) == 0 {
+			return Settings{}, fmt.Errorf("zsh.cycle_keymaps must be a nonempty array of emacs, viins, or vicmd")
+		}
+		seen := map[string]bool{}
+		for _, keymap := range settings.CycleKeymaps {
+			if seen[keymap] || (keymap != "emacs" && keymap != "viins" && keymap != "vicmd") {
+				return Settings{}, fmt.Errorf("invalid or repeated zsh.cycle_keymaps entry %q", keymap)
+			}
+			seen[keymap] = true
 		}
 	}
 	if value, ok := values["diagnostics.verbose"]; ok {

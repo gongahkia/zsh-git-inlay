@@ -71,3 +71,8 @@ The administrative evaluator never changes this user configuration. Its local
 model mode uses a private temporary daemon configuration with fallback disabled
 so a deterministic result cannot be reported as model output. See the frozen
 protocol and approval boundary in [EXECPLAN-LIVE-MODEL.md](EXECPLAN-LIVE-MODEL.md).
+
+Cycling binds both `emacs` and `viins` by default. Set
+`[zsh] cycle_keymaps = ["viins"]` (or include `vicmd`) to choose keymaps;
+`ZSH_GIT_INLAY_CYCLE_KEYMAPS=(viins)` before sourcing overrides the setting.
+Unloading restores each original binding. Re-sourcing is idempotent.
