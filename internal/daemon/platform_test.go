@@ -4,6 +4,8 @@ import (
 	"os"
 	"runtime"
 	"testing"
+
+	"github.com/gongahkia/zsh-git-inlay/internal/testenv"
 )
 
 // Darwin's Unix socket path limit is 104 bytes. Go's long test names plus
@@ -14,5 +16,11 @@ func TestMain(m *testing.M) {
 			panic(err)
 		}
 	}
-	os.Exit(m.Run())
+	cleanup, err := testenv.Isolate()
+	if err != nil {
+		panic(err)
+	}
+	code := m.Run()
+	cleanup()
+	os.Exit(code)
 }
