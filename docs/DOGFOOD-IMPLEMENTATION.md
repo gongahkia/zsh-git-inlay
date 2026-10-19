@@ -63,3 +63,10 @@ before declaring completion.
   supports idempotent install/upgrade/uninstall. Marked-block undo preserves
   unrelated later edits; interrupted merged undo also recovers. Race-tested the
   engine; installation/removal wizard and interactive-shell doctor are next.
+- Startup discovery honors ZDOTDIR after .zshenv, following the
+  [documented Zsh startup order](https://zsh.sourceforge.io/Doc/Release/Files.html).
+  Bounded normal/login interactive probes report actual loaded components,
+  PATH, strategies, async mode and bindings. Process-group cancellation and
+  [Go exec WaitDelay](https://pkg.go.dev/os/exec#Cmd) bound stalled startup and
+  inherited output pipes. Isolated-home race tests cover strict broken-config
+  defaults, startup noise, output caps and hung startup children.

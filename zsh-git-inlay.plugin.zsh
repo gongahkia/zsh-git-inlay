@@ -10,6 +10,7 @@ if (( ${+_ZSH_GIT_INLAY_LOADED} )); then
   return 0
 fi
 typeset -g _ZSH_GIT_INLAY_LOADED=1
+typeset -g ZSH_GIT_INLAY_PLUGIN_CONTRACT=2
 
 typeset -g ZSH_GIT_INLAY_CYCLE=${ZSH_GIT_INLAY_CYCLE:-0}
 if (( ! ${+ZSH_GIT_INLAY_CYCLE_KEYBINDING} )); then
@@ -19,7 +20,7 @@ fi
 
 if (( ! ${+ZSH_GIT_INLAY_CYCLE_KEYMAPS} )); then
   typeset -ga ZSH_GIT_INLAY_CYCLE_KEYMAPS
-  ZSH_GIT_INLAY_CYCLE_KEYMAPS=("${(@f)$(command zsh-git-inlay config cycle-keymaps 2>/dev/null)}")
+  ZSH_GIT_INLAY_CYCLE_KEYMAPS=("${(@f)$(command zsh-git-inlay config cycle-keymaps 2>/dev/null || true)}")
   [[ -n ${ZSH_GIT_INLAY_CYCLE_KEYMAPS[1]:-} ]] || ZSH_GIT_INLAY_CYCLE_KEYMAPS=(emacs viins)
 fi
 
@@ -175,7 +176,7 @@ zsh_git_inlay_unload() {
       bindkey -M "$keymap" "$_ZSH_GIT_INLAY_CYCLE_KEY" "${_ZSH_GIT_INLAY_CYCLE_ORIGINAL_WIDGETS[$keymap]}"
     done
   fi
-  unset _ZSH_GIT_INLAY_LOADED _ZSH_GIT_INLAY_CYCLE_ORIGINAL_WIDGETS _ZSH_GIT_INLAY_CYCLE_KEY
+  unset _ZSH_GIT_INLAY_LOADED _ZSH_GIT_INLAY_CYCLE_ORIGINAL_WIDGETS _ZSH_GIT_INLAY_CYCLE_KEY ZSH_GIT_INLAY_PLUGIN_CONTRACT
   zle -D zsh-git-inlay-cycle 2>/dev/null
   unset ZSH_GIT_INLAY_ACTIVITY_CLASS ZSH_GIT_INLAY_ACTIVITY_STARTED ZSH_GIT_INLAY_ACTIVITY_GIT_COMMIT ZSH_GIT_INLAY_LEARNING_COMMIT
   unfunction _zsh_git_inlay_maybe_commit _zsh_autosuggest_strategy_git-inlay _zsh_git_inlay_activity_classify _zsh_git_inlay_activity_emit _zsh_git_inlay_activity_preexec _zsh_git_inlay_learning_prepare _zsh_git_inlay_learning_commit _zsh_git_inlay_activity_finish _zsh_git_inlay_activity_git_state _zsh_git_inlay_observe _zsh_git_inlay_commit_context _zsh_git_inlay_cycle_widget _zsh_git_inlay_bind_cycle
