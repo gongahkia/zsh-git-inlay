@@ -1296,12 +1296,15 @@ func doctor(arguments []string) error {
 	_, gitErr := exec.LookPath("git")
 	settings, settingsErr := config.Load()
 	installation.ConfigValid = settingsErr == nil
+	if settingsErr != nil {
+		installation.Problem = settingsErr.Error()
+	}
 	var checkErr error
 	if *check {
 		checkErr = setup.Check(context.Background(), installation)
 		installation.CheckPassed = checkErr == nil
 		if checkErr != nil {
-			installation.Problem = checkErr.Error()
+			installation.Problem = errors.Join(settingsErr, checkErr).Error()
 		}
 	}
 	ollamaReport := map[string]any{"reachable": false, "models": []string{}}
@@ -1344,7 +1347,7 @@ func doctor(arguments []string) error {
 		if err := printJSON(report); err != nil {
 			return err
 		}
-		return checkErr
+		return errors.Join(settingsErr, checkErr)
 	}
 	for _, key := range []string{"zsh", "git", "zsh_autosuggestions_file", "daemon", "runtime_socket", "ollama", "managed_model", "installation", "go"} {
 		fmt.Printf("%s: %v\n", key, report[key])
@@ -1352,7 +1355,7 @@ func doctor(arguments []string) error {
 	if !autosuggestions {
 		fmt.Fprintln(os.Stdout, "action: install and source zsh-autosuggestions before zsh-git-inlay.plugin.zsh")
 	}
-	return checkErr
+	return errors.Join(settingsErr, checkErr)
 }
 
 func ensureDaemon(cwd string) error {

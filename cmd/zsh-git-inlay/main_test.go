@@ -554,3 +554,30 @@ func TestReviewCommandsPrepareAndSummarizePrivatePackets(t *testing.T) {
 		t.Fatalf("summary=%s", output)
 	}
 }
+
+func TestDoctorFailsForInvalidConfigAndExplainsTheCause(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "config.toml")
+	if err := os.WriteFile(path, []byte("[provider]\nname = \"invalid-provider\"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ZSH_GIT_INLAY_CONFIG", path)
+	t.Setenv("ZSH_GIT_INLAY_DATA_DIR", filepath.Join(root, "data"))
+	t.Setenv("ZSH_GIT_INLAY_RUNTIME_DIR", filepath.Join(root, "run"))
+	output, err := captureCommandOutput(func() error { return run([]string{"doctor", "--json"}) })
+	if err == nil || !strings.Contains(err.Error(), "provider.name") || !strings.Contains(output, path) {
+		t.Fatalf("doctor output=%s err=%v", output, err)
+	}
+	var report struct {
+		Installation struct {
+			ConfigValid bool   `json:"config_valid"`
+			Problem     string `json:"problem"`
+		} `json:"installation"`
+	}
+	if decodeErr := json.Unmarshal([]byte(output), &report); decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	if report.Installation.ConfigValid || !strings.Contains(report.Installation.Problem, "provider.name") {
+		t.Fatalf("report=%#v", report)
+	}
+}
