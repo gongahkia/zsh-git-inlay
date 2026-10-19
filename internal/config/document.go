@@ -79,7 +79,15 @@ func parseDocument(content []byte, path string, allowed map[string]bool) (docume
 			if firstKeyStart < 0 {
 				firstKeyStart = int(part.Raw.Offset)
 			}
-			keys = append(keys, string(part.Data))
+			component := string(part.Data)
+			// A quoted literal key containing '.' is distinct from a dotted
+			// namespace in TOML. Keep that distinction for schema validation,
+			// duplicate detection and surgical repair location matching.
+			if strings.Contains(component, ".") {
+				encoded, _ := json.Marshal(component)
+				component = string(encoded)
+			}
+			keys = append(keys, component)
 			lastKeyEnd = int(part.Raw.Offset + part.Raw.Length)
 		}
 		key := strings.Join(keys, ".")

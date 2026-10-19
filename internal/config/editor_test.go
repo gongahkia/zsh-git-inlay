@@ -161,3 +161,18 @@ func TestBatchConfigValidatesProviderAndModelAsOneChange(t *testing.T) {
 		t.Fatal("incomplete provider batch passed validation")
 	}
 }
+
+func TestLiteralDottedKeysCannotAliasSchemaNamespacesOrHideAValidEntry(t *testing.T) {
+	content := []byte("\"provider.name\" = 'openai' # unsupported literal key\n[provider]\nname = 'deterministic' # preserve this\n")
+	if _, err := Parse(content, "prefs.toml"); err == nil {
+		t.Fatal("literal dotted key silently aliased a schema namespace")
+	}
+	repaired, err := RepairDocument(content, "prefs.toml", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings, err := Parse(repaired.Content, "prefs.toml")
+	if err != nil || settings.Provider != "deterministic" || !bytes.Contains(repaired.Content, []byte("\nname = 'deterministic' # preserve this\n")) {
+		t.Fatalf("repair lost the valid nested setting: %s %v", repaired.Content, err)
+	}
+}
