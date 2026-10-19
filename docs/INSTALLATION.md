@@ -166,3 +166,9 @@ selected by these tools; live Homebrew install/audit awaits published artifacts.
 Packaging tests use Python 3's standard library and mock downloads; ordinary
 runtime does not require Python. Homebrew formula syntax follows its
 [Formula Cookbook](https://docs.brew.sh/Formula-Cookbook).
+
+Release snapshot creation also uses Python 3's standard-library tar/gzip writer
+to fix member order, permissions, uid/gid, timestamps and gzip metadata across
+Linux/macOS builders. This avoids BSD tar's wall-clock gzip timestamp and
+platform-specific extended metadata. Source installation and runtime retain
+their existing prerequisites.

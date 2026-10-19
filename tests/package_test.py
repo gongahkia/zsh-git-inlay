@@ -36,6 +36,27 @@ class Packages(unittest.TestCase):
             with self.assertRaises(ValueError):
                 prepare(root, "v1.2.3$(bad)", "MIT", root)
 
+    def test_release_archives_ignore_source_time_path_and_ownership(self):
+        archiver = runpy.run_path(str(PROJECT / "scripts/archive.py"))["archive"]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            outputs = []
+            for index in (1, 2):
+                source = root / f"source-{index}"
+                source.mkdir()
+                for name in ("zsh-git-inlay", "zsh-git-inlay.plugin.zsh"):
+                    path = source / name
+                    path.write_bytes(b"fixture content")
+                    os.utime(path, (index * 1000, index * 1000))
+                output = root / f"archive-{index}.tar.gz"
+                archiver(source, output, ["zsh-git-inlay", "zsh-git-inlay.plugin.zsh"])
+                outputs.append(output)
+            self.assertEqual(outputs[0].read_bytes(), outputs[1].read_bytes())
+            with tarfile.open(outputs[0]) as bundle:
+                for member in bundle.getmembers():
+                    self.assertEqual((member.uid, member.gid, member.mtime), (0, 0, 946684800))
+            self.assertEqual(outputs[0].read_bytes()[4:8], bytes(4))
+
     def test_binary_install_verifies_digest_before_writing(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

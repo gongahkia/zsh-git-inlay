@@ -77,7 +77,7 @@ for target in $targets; do
         members="$members LICENSE"
     fi
 	archive="$output/zsh-git-inlay_${version}_${target}.tar.gz"
-	tar -C "$stage" -czf "$archive" $members
+	python3 "$script_dir/archive.py" --source "$stage" --output "$archive" $members
 	chmod 644 "$archive"
 	rm -rf -- "$stage"
 	cleanup_stage=
