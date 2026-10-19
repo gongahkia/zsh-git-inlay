@@ -6,8 +6,9 @@ COMMIT ?= $(shell git rev-parse --verify HEAD 2>/dev/null || printf unknown)
 DIST ?= dist/release-snapshot
 LDFLAGS := -s -w -buildid= -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 BUILD_FLAGS := -trimpath -buildvcs=false -ldflags "$(LDFLAGS)"
+TEST_ENV := python3 scripts/test-environment.py --binary "$(abspath $(BINARY))" --
 
-.PHONY: all build test test-setup test-packaging test-go test-zsh test-eval test-reliability test-nvim test-install test-integration test-dogfood test-soak test-live-ollama fuzz lint bench release-snapshot clean
+.PHONY: all build test test-all test-lifecycle test-setup test-packaging test-go test-zsh test-eval test-reliability test-nvim test-install test-integration test-dogfood test-soak test-live-ollama fuzz lint bench release-snapshot clean
 
 all: build
 
@@ -15,25 +16,31 @@ build:
 	mkdir -p $(BUILD_DIR)
 	$(GO) build $(BUILD_FLAGS) -o $(BINARY) ./cmd/zsh-git-inlay
 
-test: test-packaging test-setup test-go test-zsh test-eval test-nvim test-install test-dogfood test-soak
+test:
+	python3 scripts/test-environment.py --binary "$(abspath $(BINARY))" -- $(MAKE) test-all
+
+test-all: test-packaging test-setup test-go test-zsh test-eval test-nvim test-install test-dogfood test-soak test-lifecycle
+
+test-lifecycle: build
+	ZSH_GIT_INLAY_BIN=$(abspath $(BINARY)) python3 tests/lifecycle.py
 
 test-go:
 	$(GO) test ./...
 
 test-zsh: build
-	ZSH_GIT_INLAY_BIN=$(abspath $(BINARY)) zsh tests/shell-contract.zsh
-	ZSH_GIT_INLAY_BIN=$(abspath $(BINARY)) zsh tests/integration.zsh
-	ZSH_GIT_INLAY_BIN=$(abspath $(BINARY)) zsh tests/reliability.zsh
+	$(TEST_ENV) env ZSH_GIT_INLAY_BIN="$(abspath $(BINARY))" zsh tests/shell-contract.zsh
+	$(TEST_ENV) env ZSH_GIT_INLAY_BIN="$(abspath $(BINARY))" zsh tests/integration.zsh
+	$(TEST_ENV) env ZSH_GIT_INLAY_BIN="$(abspath $(BINARY))" zsh tests/reliability.zsh
 
 test-eval: build
-	ZSH_GIT_INLAY_BIN=$(abspath $(BINARY)) zsh tests/evaluation.zsh
+	$(TEST_ENV) env ZSH_GIT_INLAY_BIN="$(abspath $(BINARY))" zsh tests/evaluation.zsh
 
 test-reliability: build
-	ZSH_GIT_INLAY_BIN=$(abspath $(BINARY)) zsh tests/reliability.zsh
+	$(TEST_ENV) env ZSH_GIT_INLAY_BIN="$(abspath $(BINARY))" zsh tests/reliability.zsh
 
 test-nvim:
 	@if command -v nvim >/dev/null 2>&1; then \
-		nvim --headless -u NONE -l tests/neovim.lua "$(abspath .)"; \
+		$(TEST_ENV) nvim --headless -u NONE -l tests/neovim.lua "$(abspath .)"; \
 	else \
 		echo "skipping Neovim adapter test: nvim is unavailable"; \
 	fi
@@ -42,18 +49,18 @@ test-packaging:
 	python3 -m unittest discover -s tests -p '*_test.py'
 
 test-setup: build
-	ZSH_GIT_INLAY_BIN=$(abspath $(BINARY)) zsh tests/setup.zsh
+	$(TEST_ENV) env ZSH_GIT_INLAY_BIN="$(abspath $(BINARY))" zsh tests/setup.zsh
 
 test-install: build
-	zsh tests/install.zsh "$(abspath .)"
+	$(TEST_ENV) zsh tests/install.zsh "$(abspath .)"
 
 test-integration: test-zsh test-eval test-nvim test-dogfood
 
 test-dogfood: build
-	ZSH_GIT_INLAY_BIN=$(abspath $(BINARY)) zsh tests/dogfood.zsh
+	$(TEST_ENV) env ZSH_GIT_INLAY_BIN="$(abspath $(BINARY))" zsh tests/dogfood.zsh
 
 test-soak: build
-	ZSH_GIT_INLAY_BIN=$(abspath $(BINARY)) zsh tests/soak.zsh
+	$(TEST_ENV) env ZSH_GIT_INLAY_BIN="$(abspath $(BINARY))" zsh tests/soak.zsh
 
 # This is deliberately opt-in: it needs a separately started loopback Ollama
 # runtime and an already downloaded model named by ZSH_GIT_INLAY_LIVE_OLLAMA_MODEL.

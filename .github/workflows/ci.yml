@@ -29,7 +29,9 @@ jobs:
           cache: false
       - name: install Linux test prerequisites
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install --yes zsh zsh-autosuggestions
+        run: |
+          sudo apt-get update && sudo apt-get install --yes zsh zsh-autosuggestions
+          echo "ZSH_AUTOSUGGESTIONS_SOURCE=/usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh" >> "$GITHUB_ENV"
       - name: install macOS test prerequisites
         if: runner.os == 'macOS'
         run: |
