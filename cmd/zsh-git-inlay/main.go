@@ -30,6 +30,7 @@ import (
 	"github.com/gongahkia/zsh-git-inlay/internal/provider"
 	"github.com/gongahkia/zsh-git-inlay/internal/repoctx"
 	runtimepath "github.com/gongahkia/zsh-git-inlay/internal/runtime"
+	"github.com/gongahkia/zsh-git-inlay/internal/setup"
 )
 
 var (
@@ -51,6 +52,8 @@ func run(arguments []string) error {
 	switch arguments[0] {
 	case "version":
 		return versionCommand(arguments[1:])
+	case "setup":
+		return setupCommand(arguments[1:])
 	case "doctor":
 		return doctor(arguments[1:])
 	case "config":
@@ -91,7 +94,7 @@ func run(arguments []string) error {
 }
 
 func usage() error {
-	return errors.New("usage: zsh-git-inlay {version|doctor|config|status|fingerprint|context|observe|suggest|candidates|explain|evaluate|model|permissions|cloud|compose|activity|learning|daemon serve|daemon stop}")
+	return errors.New("usage: zsh-git-inlay {version|setup|doctor|config|status|fingerprint|context|observe|suggest|candidates|explain|evaluate|model|permissions|cloud|compose|activity|learning|daemon serve|daemon stop}")
 }
 
 func versionCommand(arguments []string) error {
@@ -1279,22 +1282,25 @@ func daemonCommand(arguments []string) error {
 
 func doctor(arguments []string) error {
 	flags, _, jsonOutput := commonFlags("doctor")
+	check := flags.Bool("check", false, "verify the installed shell integration")
 	if err := flags.Parse(arguments); err != nil {
 		return err
 	}
-	autosuggestions := false
-	for _, path := range []string{
-		"/usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh",
-		"/usr/local/share/zsh-autosuggestions/zsh-autosuggestions.zsh",
-	} {
-		if info, err := os.Stat(path); err == nil && !info.IsDir() {
-			autosuggestions = true
-			break
-		}
-	}
+	binary, _ := os.Executable()
+	installation := setup.Discover(binary)
+	autosuggestions := installation.Autosuggestions != ""
 	_, zshErr := exec.LookPath("zsh")
 	_, gitErr := exec.LookPath("git")
 	settings, settingsErr := config.Load()
+	installation.ConfigValid = settingsErr == nil
+	var checkErr error
+	if *check {
+		checkErr = setup.Check(context.Background(), installation)
+		installation.CheckPassed = checkErr == nil
+		if checkErr != nil {
+			installation.Problem = checkErr.Error()
+		}
+	}
 	ollamaReport := map[string]any{"reachable": false, "models": []string{}}
 	if ollama, err := provider.NewOllama(provider.DefaultOllamaURL, "diagnostic", 250*time.Millisecond); err == nil {
 		if models, modelsErr := ollama.Models(context.Background()); modelsErr == nil {
@@ -1330,17 +1336,20 @@ func doctor(arguments []string) error {
 			state = "running"
 		}
 	}
-	report := map[string]any{"zsh": zshErr == nil, "git": gitErr == nil, "zsh_autosuggestions_file": autosuggestions, "daemon": state, "runtime_socket": socket, "go": runtime.Version(), "ollama": ollamaReport, "managed_model": managedReport}
+	report := map[string]any{"zsh": zshErr == nil, "git": gitErr == nil, "zsh_autosuggestions_file": autosuggestions, "daemon": state, "runtime_socket": socket, "go": runtime.Version(), "installation": installation, "ollama": ollamaReport, "managed_model": managedReport}
 	if *jsonOutput {
-		return printJSON(report)
+		if err := printJSON(report); err != nil {
+			return err
+		}
+		return checkErr
 	}
-	for _, key := range []string{"zsh", "git", "zsh_autosuggestions_file", "daemon", "runtime_socket", "ollama", "managed_model", "go"} {
+	for _, key := range []string{"zsh", "git", "zsh_autosuggestions_file", "daemon", "runtime_socket", "ollama", "managed_model", "installation", "go"} {
 		fmt.Printf("%s: %v\n", key, report[key])
 	}
 	if !autosuggestions {
 		fmt.Fprintln(os.Stdout, "action: install and source zsh-autosuggestions before zsh-git-inlay.plugin.zsh")
 	}
-	return nil
+	return checkErr
 }
 
 func ensureDaemon(cwd string) error {

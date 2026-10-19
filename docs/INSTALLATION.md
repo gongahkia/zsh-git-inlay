@@ -129,3 +129,18 @@ Semantic Versioning and approval policy; no tag, package, or GitHub release is
 created by these commands. See [LICENSE-REVIEW.md](LICENSE-REVIEW.md) before
 redistribution. Archives include neither Ollama, `zsh-autosuggestions`, model
 weights, cached activity, configuration, nor local evaluation reports.
+
+## Setup verification and disposable demo
+
+After source/archive installation, `zsh-git-inlay setup` prints correctly quoted
+source lines without editing `.zshrc`. Dependency discovery honors
+`ZSH_AUTOSUGGESTIONS_SOURCE` and common Linux/Intel Homebrew/Apple Silicon
+Homebrew paths. The plugin is discovered relative to the executable, including
+Homebrew symlinks and the source build directory.
+
+Run `zsh-git-inlay setup --check --demo` to source the installed files in a
+clean Zsh, verify registration and version, and prepare a candidate through the
+actual daemon/socket/lookup path in a disposable repository. The demo isolates
+config, cache, activity/learning data and runtime; it uses deterministic
+inference, never commits, and cleans up its daemon and files. `--json` supports
+automation. `doctor --check` includes the same shell integration check.
