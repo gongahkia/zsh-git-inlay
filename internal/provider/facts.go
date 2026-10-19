@@ -39,6 +39,14 @@ func factualCandidates(evidence []repoctx.Evidence, patch string, baseline []Can
 	// Specific semantic facts precede file summaries; all are checked again by
 	// repository policy and grounding before publication.
 	for _, fact := range patchFacts(patch, evidence) {
+		if fact.Scope == "" {
+			for _, item := range evidence {
+				if len(fact.EvidenceIDs) > 0 && fact.EvidenceIDs[0] == item.ID {
+					fact.Scope = factScope(item.Path)
+					break
+				}
+			}
+		}
 		add(fact)
 	}
 	if len(evidence) > 1 {
@@ -71,7 +79,7 @@ func factualCandidates(evidence []repoctx.Evidence, patch string, baseline []Can
 		if strings.HasSuffix(item.Path, ".md") || strings.HasPrefix(item.Path, "docs/") {
 			kind = "docs"
 		}
-		add(Candidate{Type: kind, Subject: verb + " " + name, EvidenceIDs: []string{item.ID}})
+		add(Candidate{Type: kind, Scope: factScope(item.Path), Subject: verb + " " + name, EvidenceIDs: []string{item.ID}})
 	}
 	for _, value := range baseline {
 		add(value)
@@ -171,4 +179,13 @@ func patchFacts(patch string, evidence []repoctx.Evidence) []Candidate {
 	}
 	flush()
 	return result
+}
+
+func factScope(file string) string {
+	first, _, _ := strings.Cut(strings.TrimPrefix(file, "./"), "/")
+	first = strings.ToLower(first)
+	if messageScope.MatchString(first) {
+		return first
+	}
+	return ""
 }
