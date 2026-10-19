@@ -108,6 +108,11 @@ type Server struct {
 	prepared         map[string]preparedLearning
 	stop             chan struct{}
 	stopped          sync.Once
+	lifetime         context.Context
+	cancel           context.CancelFunc
+	closing          bool // protected by mu; prevents Add racing shutdown Wait
+	jobsDone         sync.WaitGroup
+	requestsDone     sync.WaitGroup
 }
 
 type active struct {
@@ -150,6 +155,7 @@ func PrepareForEvaluation(ctx context.Context, settings config.Settings, cwd, ca
 		return Record{}, fmt.Errorf("set evaluation cache permissions: %w", err)
 	}
 	server := New(settings, "", cacheDir)
+	defer server.Close()
 	reply := server.observeWithContext(ctx, cwd, false)
 	if reply.Status != "pending" && reply.Status != "ready" {
 		return Record{}, fmt.Errorf("evaluation observation %s: %s", reply.Status, reply.Error)
@@ -205,11 +211,12 @@ func newServerWithLearning(settings config.Settings, socket, cacheDir string, ev
 }
 
 func newServerWithCloud(settings config.Settings, socket, cacheDir string, events *activity.Store, learner *learning.Store, grants *cloud.Store) *Server {
+	lifetime, cancel := context.WithCancel(context.Background())
 	selected, err := provider.New(settings)
 	if err != nil {
 		selected = provider.Deterministic{}
 	}
-	return &Server{settings: settings, socket: socket, cacheDir: cacheDir, cache: map[string]Record{}, active: map[string]active{}, jobs: map[string]job{}, failures: map[string]string{}, sem: make(chan struct{}, settings.MaxGenerationJobs), lastUse: time.Now(), cacheStatus: CacheStatus{MaxEntries: settings.CacheMaxRecords, MaxBytes: settings.CacheMaxBytes}, provider: selected, fallback: provider.Fallback(settings), providerVersion: settings.Version, preferences: settings, ambiguityPolicy: settings.GroundingPolicy, activity: events, learner: learner, cloud: grants, learningProfiles: map[string]learning.Profile{}, prepared: map[string]preparedLearning{}, stop: make(chan struct{})}
+	return &Server{settings: settings, socket: socket, cacheDir: cacheDir, cache: map[string]Record{}, active: map[string]active{}, jobs: map[string]job{}, failures: map[string]string{}, sem: make(chan struct{}, settings.MaxGenerationJobs), lastUse: time.Now(), cacheStatus: CacheStatus{MaxEntries: settings.CacheMaxRecords, MaxBytes: settings.CacheMaxBytes}, provider: selected, fallback: provider.Fallback(settings), providerVersion: settings.Version, preferences: settings, ambiguityPolicy: settings.GroundingPolicy, activity: events, learner: learner, cloud: grants, learningProfiles: map[string]learning.Profile{}, prepared: map[string]preparedLearning{}, stop: make(chan struct{}), lifetime: lifetime, cancel: cancel}
 }
 
 func activitySettings(settings config.Settings) activity.Settings {
@@ -275,7 +282,13 @@ func Serve(ctx context.Context, settings config.Settings, initialCWD string, bui
 		return err
 	}
 	defer func() { listener.Close(); _ = os.Remove(socket) }()
-	go func() { <-ctx.Done(); server.Close() }()
+	go func() {
+		select {
+		case <-ctx.Done():
+			server.Close()
+		case <-server.stop:
+		}
+	}()
 	if initialCWD != "" {
 		server.observe(initialCWD)
 	}
@@ -283,6 +296,7 @@ func Serve(ctx context.Context, settings config.Settings, initialCWD string, bui
 }
 
 func (server *Server) serve(listener net.Listener) error {
+	defer server.Close()
 	for {
 		if unixListener, ok := listener.(*net.UnixListener); ok {
 			_ = unixListener.SetDeadline(time.Now().Add(200 * time.Millisecond))
@@ -308,7 +322,15 @@ func (server *Server) serve(listener net.Listener) error {
 			}
 			continue
 		}
-		go server.handle(connection)
+		server.mu.Lock()
+		if server.closing {
+			server.mu.Unlock()
+			connection.Close()
+			return nil
+		}
+		server.requestsDone.Add(1)
+		server.mu.Unlock()
+		go func(connection net.Conn) { defer server.requestsDone.Done(); server.handle(connection) }(connection)
 	}
 }
 
@@ -370,10 +392,15 @@ func (server *Server) handle(connection net.Conn) {
 }
 
 func (server *Server) observe(cwd string) ipc.Reply {
-	return server.observeWithContext(context.Background(), cwd, true)
+	return server.observeWithContext(server.lifetime, cwd, true)
 }
 
 func (server *Server) observeWithContext(parent context.Context, cwd string, refreshProvider bool) ipc.Reply {
+	select {
+	case <-server.stop:
+		return ipc.Reply{Version: ipc.Version, Status: "stopping"}
+	default:
+	}
 	if cwd == "" || len(cwd) > 4096 {
 		return ipc.Reply{Version: ipc.Version, Status: "malformed", Error: "invalid working directory"}
 	}
@@ -382,7 +409,7 @@ func (server *Server) observeWithContext(parent context.Context, cwd string, ref
 			return server.noteObserve(ipc.Reply{Version: ipc.Version, Status: "error", Error: err.Error()})
 		}
 	}
-	snapshotContext, cancel := gitstate.WithTimeout()
+	snapshotContext, cancel := context.WithTimeout(parent, 2*time.Second)
 	defer cancel()
 	state, err := gitstate.Snapshot(snapshotContext, cwd)
 	if err != nil {
@@ -401,6 +428,10 @@ func (server *Server) observeWithContext(parent context.Context, cwd string, ref
 		cacheErr = os.ErrNotExist
 	}
 	server.mu.Lock()
+	if server.closing {
+		server.mu.Unlock()
+		return ipc.Reply{Version: ipc.Version, Status: "stopping"}
+	}
 	server.evictLocked()
 	previous, seen := server.active[state.Scope()]
 	if seen && previous.fingerprint != state.Fingerprint {
@@ -429,8 +460,9 @@ func (server *Server) observeWithContext(parent context.Context, cwd string, ref
 	server.nextJob++
 	jobID := server.nextJob
 	server.jobs[state.Fingerprint] = job{cancel: cancelJob, id: jobID}
+	server.jobsDone.Add(1)
 	server.mu.Unlock()
-	go server.generate(jobContext, state, cwd, jobID)
+	go func() { defer server.jobsDone.Done(); server.generate(jobContext, state, cwd, jobID) }()
 	return ipc.Reply{Version: ipc.Version, Status: "pending"}
 }
 
@@ -504,11 +536,14 @@ func (server *Server) generate(ctx context.Context, expected gitstate.State, cwd
 	if len(candidates) > preferences.CandidateCount && preferences.CandidateCount > 0 {
 		candidates, reports = candidates[:preferences.CandidateCount], reports[:preferences.CandidateCount]
 	}
-	checkContext, cancel := gitstate.WithTimeout()
+	checkContext, cancel := context.WithTimeout(ctx, 2*time.Second)
 	current, checkErr := gitstate.Snapshot(checkContext, cwd)
 	cancel()
 	if checkErr != nil || current.Availability != gitstate.Ready || current.Fingerprint != expected.Fingerprint {
 		failure = "staged state changed before publication"
+		return
+	}
+	if ctx.Err() != nil {
 		return
 	}
 	if decision := server.controlReply(expected.RepoID); decision != nil {
@@ -520,7 +555,7 @@ func (server *Server) generate(ctx context.Context, expected gitstate.State, cwd
 		failure = "store candidate record: " + err.Error()
 		return
 	}
-	finalContext, finalCancel := gitstate.WithTimeout()
+	finalContext, finalCancel := context.WithTimeout(ctx, 2*time.Second)
 	final, finalErr := gitstate.Snapshot(finalContext, cwd)
 	finalCancel()
 	if finalErr != nil || final.Availability != gitstate.Ready || final.Fingerprint != expected.Fingerprint {
@@ -1144,7 +1179,22 @@ func (server *Server) noteObserve(reply ipc.Reply) ipc.Reply {
 	return reply
 }
 
-func (server *Server) Close() { server.stopped.Do(func() { close(server.stop) }) }
+func (server *Server) Close() {
+	server.stopped.Do(func() {
+		server.mu.Lock()
+		server.closing = true
+		for _, pending := range server.jobs {
+			pending.cancel()
+		}
+		close(server.stop)
+		server.mu.Unlock()
+		if server.cancel != nil {
+			server.cancel()
+		}
+	})
+	server.requestsDone.Wait()
+	server.jobsDone.Wait()
+}
 
 func (server *Server) evictLocked() {
 	if len(server.active) < server.settings.MaxRepositories {

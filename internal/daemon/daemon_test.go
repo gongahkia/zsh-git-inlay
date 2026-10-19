@@ -27,6 +27,7 @@ import (
 
 func TestObservePublishesAtomicScopedCandidates(t *testing.T) {
 	server, socket := testServer(t)
+	defer server.Close()
 	first := daemonRepository(t, "first.txt")
 	second := daemonRepository(t, "second.txt")
 	for _, repository := range []string{first, second} {
@@ -56,6 +57,7 @@ func TestObservePublishesAtomicScopedCandidates(t *testing.T) {
 
 func TestSupersededStateCannotPublish(t *testing.T) {
 	server, _ := testServer(t)
+	defer server.Close()
 	repository := daemonRepository(t, "first.txt")
 	first := daemonSnapshot(t, repository)
 	if err := os.WriteFile(filepath.Join(repository, "second.txt"), []byte("second\n"), 0o644); err != nil {
@@ -92,6 +94,7 @@ func TestPrepareForEvaluationUsesDaemonPublicationAndLookup(t *testing.T) {
 
 func TestLearningObservesOnlyACompletedCommit(t *testing.T) {
 	server, _ := testServer(t)
+	defer server.Close()
 	store, err := learning.New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -161,6 +164,7 @@ func TestLearningClassificationIsBoundedAndConservative(t *testing.T) {
 
 func TestExplicitDeterministicFallbackPublishesAfterProviderFailure(t *testing.T) {
 	server, _ := testServer(t)
+	defer server.Close()
 	server.settings.Provider = "ollama"
 	server.settings.ProviderModel = "missing"
 	server.settings.ProviderFallback = "deterministic"
@@ -179,6 +183,7 @@ func TestExplicitDeterministicFallbackPublishesAfterProviderFailure(t *testing.T
 
 func TestCloudGenerationRequiresGrantAndRevocationRejectsCachedCandidate(t *testing.T) {
 	server, _ := testServer(t)
+	defer server.Close()
 	grants, err := cloud.New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -225,6 +230,7 @@ func TestCloudGenerationRequiresGrantAndRevocationRejectsCachedCandidate(t *test
 
 func TestCloudGrantChangeCancelsInflightBackgroundJob(t *testing.T) {
 	server, _ := testServer(t)
+	defer server.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	server.mu.Lock()
@@ -242,6 +248,7 @@ func TestCloudGrantChangeCancelsInflightBackgroundJob(t *testing.T) {
 
 func TestGenerationReceivesBoundedContextAndRecordsItsIdentity(t *testing.T) {
 	server, _ := testServer(t)
+	defer server.Close()
 	repository := daemonRepository(t, "context.go")
 	state := daemonSnapshot(t, repository)
 	capturing := &contextCapturingProvider{}
@@ -284,6 +291,7 @@ func TestRankingDemotesUnsupportedProviderClaims(t *testing.T) {
 
 func TestObserveRefreshesChangedProviderConfiguration(t *testing.T) {
 	server, _ := testServer(t)
+	defer server.Close()
 	configRoot := t.TempDir()
 	path := filepath.Join(configRoot, "zsh-git-inlay", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -309,6 +317,7 @@ func TestObserveRefreshesChangedProviderConfiguration(t *testing.T) {
 
 func TestActivitySocketRequiresConsentAndMatchingRepositoryScope(t *testing.T) {
 	server, socket := testServer(t)
+	defer server.Close()
 	permissions := activity.Permissions{}
 	server.activity = activity.New(activity.DefaultSettings(), func() (activity.Permissions, error) { return permissions, nil })
 	repository := daemonRepository(t, "activity.go")
@@ -346,6 +355,7 @@ func TestActivitySocketRequiresConsentAndMatchingRepositoryScope(t *testing.T) {
 
 func TestActivitySignalsReachContextAndRevocationInvalidatesLookup(t *testing.T) {
 	server, socket := testServer(t)
+	defer server.Close()
 	permissions := activity.Permissions{Activity: true}
 	server.activity = activity.New(activity.DefaultSettings(), func() (activity.Permissions, error) { return permissions, nil })
 	repository := daemonRepository(t, "activity.go")
@@ -371,6 +381,7 @@ func TestActivitySignalsReachContextAndRevocationInvalidatesLookup(t *testing.T)
 
 func TestActivityGitStateReportsOnlyObservedIndexAndHeadChanges(t *testing.T) {
 	server, _ := testServer(t)
+	defer server.Close()
 	server.activity = activity.New(activity.DefaultSettings(), func() (activity.Permissions, error) { return activity.Permissions{Activity: true}, nil })
 	repository := daemonRepository(t, "activity.go")
 	if reply := server.observeActivityGit(repository, false); reply.Status != "ready" {
@@ -436,7 +447,8 @@ func (capture *cloudCapturingProvider) Generate(ctx context.Context, request pro
 }
 
 func TestMalformedSocketRequestIsRejected(t *testing.T) {
-	_, socket := testServer(t)
+	server, socket := testServer(t)
+	defer server.Close()
 	connection, err := net.Dial("unix", socket)
 	if err != nil {
 		t.Fatal(err)
@@ -454,7 +466,8 @@ func TestMalformedSocketRequestIsRejected(t *testing.T) {
 }
 
 func TestTruncatedSocketRequestDoesNotStopDaemon(t *testing.T) {
-	_, socket := testServer(t)
+	server, socket := testServer(t)
+	defer server.Close()
 	connection, err := net.Dial("unix", socket)
 	if err != nil {
 		t.Fatal(err)
@@ -474,7 +487,8 @@ func TestTruncatedSocketRequestDoesNotStopDaemon(t *testing.T) {
 }
 
 func TestConcurrentSessionsAndRapidIndexChanges(t *testing.T) {
-	_, socket := testServer(t)
+	server, socket := testServer(t)
+	defer server.Close()
 	repository := daemonRepository(t, "state.txt")
 	errors := make(chan error, 12)
 	for client := 0; client < cap(errors); client++ {

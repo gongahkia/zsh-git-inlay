@@ -68,6 +68,39 @@ func TestDisableDuringGenerationPreventsPublication(t *testing.T) {
 	}
 }
 
+func TestStopCancelsAndDrainsGenerationBeforeReturning(t *testing.T) {
+	repository := daemonRepository(t, "shutdown.go")
+	state := daemonSnapshot(t, repository)
+	server := New(config.Default(), "", t.TempDir())
+	defer server.Close()
+	blocked := &controlBlockingProvider{started: make(chan struct{}), resume: make(chan struct{})}
+	server.provider, server.fallback = blocked, nil
+	if reply := server.observe(repository); reply.Status != "pending" {
+		t.Fatalf("observe: %+v", reply)
+	}
+	select {
+	case <-blocked.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("provider did not start")
+	}
+	done := make(chan struct{})
+	go func() { server.Close(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("stop did not cancel and drain the pending provider")
+	}
+	if server.pending(state.Fingerprint) {
+		t.Fatal("stop returned with a pending generation job")
+	}
+	if _, err := os.Stat(server.cachePath(state.Fingerprint)); !os.IsNotExist(err) {
+		t.Fatal("cancelled shutdown published a candidate")
+	}
+	if reply := server.observe(repository); reply.Status != "stopping" {
+		t.Fatalf("stopped server accepted a new job: %+v", reply)
+	}
+}
+
 type controlBlockingProvider struct{ started, resume chan struct{} }
 
 func (*controlBlockingProvider) Metadata() provider.Metadata {
