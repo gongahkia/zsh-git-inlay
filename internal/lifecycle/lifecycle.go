@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gongahkia/zsh-git-inlay/internal/config"
 	"github.com/gongahkia/zsh-git-inlay/internal/edit"
 )
 
@@ -40,6 +41,7 @@ type Options struct {
 	Binary, Plugin, Version            string
 	Notices                            map[string]string // filename to local source path
 	MigrateLegacy, Adopt, Repair       bool
+	Configuration                      *edit.Change
 }
 
 type Manager struct {
@@ -197,6 +199,15 @@ func (manager Manager) Install(options Options) (Result, error) {
 		return result, err
 	}
 	changes = appendChanged(changes, edit.Change{Before: shell, Data: updated, ManagedBlock: true})
+	if options.Configuration != nil {
+		if options.Configuration.Remove {
+			return result, errors.New("setup cannot remove user preferences")
+		}
+		if err := config.Validate(options.Configuration.Data, options.Configuration.Before.Path, false); err != nil {
+			return result, err
+		}
+		changes = appendChanged(changes, *options.Configuration)
+	}
 	if previousErr == nil {
 		manifest.Installed = previous.Installed
 	}

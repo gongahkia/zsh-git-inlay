@@ -50,7 +50,7 @@ func Discover(binary string) Installation {
 		binaryPath = binary
 	}
 	root := filepath.Dir(filepath.Dir(binaryPath))
-	for _, candidate := range []string{filepath.Join(root, "share", "zsh-git-inlay", "zsh-git-inlay.plugin.zsh"), filepath.Join(root, "zsh-git-inlay.plugin.zsh")} {
+	for _, candidate := range []string{filepath.Join(root, "share", "zsh-git-inlay", "zsh-git-inlay.plugin.zsh"), filepath.Join(filepath.Dir(binaryPath), "zsh-git-inlay.plugin.zsh"), filepath.Join(root, "zsh-git-inlay.plugin.zsh")} {
 		if readable(candidate) {
 			result.Plugin = candidate
 			break

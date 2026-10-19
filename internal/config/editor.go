@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"sort"
 	"strings"
 	"time"
 )
@@ -142,6 +143,32 @@ func Show(content []byte, path string, repository bool) ([]Entry, error) {
 // intact. The entire resulting document must validate before it can be saved.
 // String/duration arguments accept plain text or an explicit TOML string.
 func Edit(content []byte, path, key, value string, reset, repository bool) ([]byte, error) {
+	return editValue(content, path, key, value, reset, repository, true)
+}
+
+// EditMany validates interdependent wizard choices together: selecting a model
+// provider and its required model/fallback must be one recoverable write.
+func EditMany(content []byte, path string, values map[string]string, repository bool) ([]byte, error) {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	updated := append([]byte(nil), content...)
+	for _, key := range keys {
+		var err error
+		updated, err = editValue(updated, path, key, values[key], false, repository, false)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if err := Validate(updated, path, repository); err != nil {
+		return nil, err
+	}
+	return updated, nil
+}
+
+func editValue(content []byte, path, key, value string, reset, repository, validate bool) ([]byte, error) {
 	var spec *Entry
 	for _, entry := range Schema(repository) {
 		if entry.Key == key {
@@ -182,8 +209,10 @@ func Edit(content []byte, path, key, value string, reset, repository bool) ([]by
 		}
 		updated = append(append(append([]byte(nil), content[:at]...), insertion...), content[at:]...)
 	}
-	if err := Validate(updated, path, repository); err != nil {
-		return nil, err
+	if validate {
+		if err := Validate(updated, path, repository); err != nil {
+			return nil, err
+		}
 	}
 	return updated, nil
 }

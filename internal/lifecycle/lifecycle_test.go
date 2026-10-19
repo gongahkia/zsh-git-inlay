@@ -204,3 +204,33 @@ func TestUninstallNeverDeletesASymlinkArtifactTarget(t *testing.T) {
 		t.Fatal("uninstall changed symlink target")
 	}
 }
+
+func TestSetupAndPreferenceChangeAreOneValidatedUndoableTransaction(t *testing.T) {
+	manager, options := fixture(t)
+	path := filepath.Join(filepath.Dir(options.Binary), "preferences.toml")
+	before, err := edit.Read(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	options.Configuration = &edit.Change{Before: before, Data: []byte("[suggestions]\ncandidate_count = 0\n")}
+	if _, err := manager.Install(options); err == nil {
+		t.Fatal("invalid wizard configuration passed installation")
+	}
+	if _, err := os.Stat(filepath.Join(options.Prefix, "bin/zsh-git-inlay")); !os.IsNotExist(err) {
+		t.Fatal("invalid wizard configuration partly installed files")
+	}
+	options.Configuration.Data = []byte("# preferences\n[commit]\ncapitalization = 'sentence'\n")
+	installed, err := manager.Install(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(readFile(t, path), []byte("sentence")) {
+		t.Fatal("wizard preferences missing")
+	}
+	if _, err := manager.History.UndoWith(installed.Journal.ID, MergeUndo); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("undo left wizard preferences")
+	}
+}

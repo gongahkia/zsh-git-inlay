@@ -146,3 +146,18 @@ func TestRepairNeverReassignsUnknownTableChildren(t *testing.T) {
 		t.Fatalf("repair reassigned unknown table's children: %+v %v\n%s", settings, err, repair.Content)
 	}
 }
+
+func TestBatchConfigValidatesProviderAndModelAsOneChange(t *testing.T) {
+	content := []byte("# retain me\n[zsh]\ncycle_keybinding = '^Xg'\n")
+	updated, err := EditMany(content, "prefs.toml", map[string]string{"provider.name": "openai", "provider.model": "gpt-example", "provider.fallback": "none", "commit.capitalization": "sentence"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings, err := Parse(updated, "prefs.toml")
+	if err != nil || settings.Provider != "openai" || settings.ProviderModel != "gpt-example" || settings.ProviderFallback != "none" || settings.MessageCaps != "sentence" || !bytes.Contains(updated, []byte("# retain me")) {
+		t.Fatalf("batch failed to preserve/validate preferences: %+v %v", settings, err)
+	}
+	if _, err := EditMany(content, "prefs.toml", map[string]string{"provider.name": "openai"}, false); err == nil {
+		t.Fatal("incomplete provider batch passed validation")
+	}
+}
