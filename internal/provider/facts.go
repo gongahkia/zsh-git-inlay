@@ -183,7 +183,7 @@ func patchFacts(patch string, evidence []repoctx.Evidence) []Candidate {
 
 func factScope(file string) string {
 	first, _, _ := strings.Cut(strings.TrimPrefix(file, "./"), "/")
-	first = strings.ToLower(first)
+	first = strings.Trim(strings.ToLower(first), "-.")
 	if messageScope.MatchString(first) {
 		return first
 	}

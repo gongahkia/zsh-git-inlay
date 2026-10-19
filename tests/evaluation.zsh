@@ -10,10 +10,10 @@ trap 'command rm -rf -- "$root"' EXIT
 export ZSH_GIT_INLAY_STATE_DIR="$root/state"
 
 output=$(command "$ZSH_GIT_INLAY_BIN" evaluate --fixtures --json)
-print -r -- "$output" | command grep -q '"cases": 15' || { print -u2 -- 'fixture evaluation did not report all cases'; exit 1 }
+print -r -- "$output" | command grep -q '"cases": 27' || { print -u2 -- 'fixture evaluation did not report all cases'; exit 1 }
 
 held_out=$(command "$ZSH_GIT_INLAY_BIN" evaluate --fixtures --partition held-out --json)
-print -r -- "$held_out" | command grep -q '"cases": 7' || { print -u2 -- 'held-out evaluation did not report its partition'; exit 1 }
+print -r -- "$held_out" | command grep -q '"cases": 19' || { print -u2 -- 'held-out evaluation did not report its partition'; exit 1 }
 
 json_count=$(command find "$ZSH_GIT_INLAY_STATE_DIR/evaluations" -type f -name '*.json' | command wc -l)
 markdown_count=$(command find "$ZSH_GIT_INLAY_STATE_DIR/evaluations" -type f -name '*.md' | command wc -l)

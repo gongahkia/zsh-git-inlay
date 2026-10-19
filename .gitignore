@@ -4,3 +4,5 @@ AGENTS.md
 /evaluation-private/
 *.zsh-git-inlay-evaluation.json
 *.zsh-git-inlay-evaluation.md
+
+__pycache__/

@@ -72,6 +72,8 @@ func run(arguments []string) error {
 		return explain(arguments[1:])
 	case "status":
 		return status(arguments[1:])
+	case "review":
+		return reviewCommand(arguments[1:])
 	case "evaluate":
 		return evaluateCommand(arguments[1:])
 	case "model":
@@ -94,7 +96,7 @@ func run(arguments []string) error {
 }
 
 func usage() error {
-	return errors.New("usage: zsh-git-inlay {version|setup|doctor|config|status|fingerprint|context|observe|suggest|candidates|explain|evaluate|model|permissions|cloud|compose|activity|learning|daemon serve|daemon stop}")
+	return errors.New("usage: zsh-git-inlay {version|setup|doctor|config|status|fingerprint|context|observe|suggest|candidates|explain|evaluate|review|model|permissions|cloud|compose|activity|learning|daemon serve|daemon stop}")
 }
 
 func versionCommand(arguments []string) error {
@@ -430,6 +432,7 @@ func status(arguments []string) error {
 func evaluateCommand(arguments []string) error {
 	flags := flag.NewFlagSet("evaluate", flag.ContinueOnError)
 	flags.SetOutput(ioDiscard{})
+	corpusVersion := flags.String("corpus", evaluation.CorpusVersion, "synthetic corpus version: v2 or v3")
 	fixtures := flags.Bool("fixtures", false, "run the embedded synthetic corpus")
 	repository := flags.String("repo", "", "replay eligible commits from this local repository")
 	provider := flags.String("provider", "deterministic", "evaluation provider")
@@ -474,7 +477,7 @@ func evaluateCommand(arguments []string) error {
 	options := evaluation.Options{Timeout: *timeout, Limit: *limit}
 	var report evaluation.Report
 	if *fixtures {
-		corpus, corpusErr := evaluation.LoadCorpus()
+		corpus, corpusErr := evaluation.LoadCorpusVersion(*corpusVersion)
 		if corpusErr != nil {
 			return corpusErr
 		}

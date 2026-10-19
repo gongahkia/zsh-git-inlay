@@ -24,8 +24,8 @@ func TestSyntheticCorpusEvaluatesDeterministically(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(corpus.Cases) != 15 {
-		t.Fatalf("fixture count = %d, want 15", len(corpus.Cases))
+	if len(corpus.Cases) != 27 {
+		t.Fatalf("fixture count = %d, want 27", len(corpus.Cases))
 	}
 	generator, err := NewDeterministicDaemonGenerator()
 	if err != nil {
@@ -54,7 +54,7 @@ func TestSyntheticCorpusEvaluatesDeterministically(t *testing.T) {
 		t.Fatalf("development corpus=%#v err=%v", development, err)
 	}
 	heldOut, err := Partition(corpus, "held-out")
-	if err != nil || len(heldOut.Cases) != 7 {
+	if err != nil || len(heldOut.Cases) != 19 {
 		t.Fatalf("held-out corpus=%#v err=%v", heldOut, err)
 	}
 	heldOutReport, err := EvaluateCorpus(context.Background(), heldOut, generator, DefaultOptions())

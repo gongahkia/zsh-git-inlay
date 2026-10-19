@@ -142,3 +142,46 @@ improvement over this control. The complete acceptance criteria and approval
 boundary are in [EXECPLAN-LIVE-MODEL.md](EXECPLAN-LIVE-MODEL.md). No model
 satisfies that evidence standard because each tested model failed the
 development operational and structured-output gates.
+
+## Versioned expanded corpus
+
+The new default corpus is `v3`: 8 development and 19 held-out cases. Its
+additional held-out scenarios cover Go/JavaScript version bumps, Python,
+TypeScript and Rust declarations, root documentation, workflows, assets,
+lockfiles, Unicode paths, long paths and a staged/unstaged dependency-version
+split. The original `v2` bytes remain unchanged and are selectable with
+`evaluate --fixtures --corpus v2`. Select the corpus explicitly when reproducing
+frozen evidence; results across corpus versions are not directly comparable.
+
+Private JSON reports now retain the prepared candidate texts for explicit
+human comparison and per-case cold/warm provider timings when available. They
+still omit raw staged diffs, prompts and model responses. Candidate text, like
+reference subjects, can contain private repository information; report storage
+continues to use private directories/files.
+
+## Private blinded human comparison
+
+Generate two evaluation reports over the identical corpus version and partition,
+for example `--provider deterministic-baseline` and `--provider deterministic`.
+Then run:
+
+```zsh
+zsh-git-inlay review prepare --left /private/baseline.json --right /private/new.json --output-dir /private/review
+zsh-git-inlay review summarize --packet /private/review/packet.json --key /private/review/key.json --ratings /private/review/ratings.json
+```
+
+Give only `packet.json` to the reviewer; keep `key.json` separate until scoring.
+Labels are randomized independently per case and omit provider metadata. Public
+synthetic fixture context is included when its corpus digest matches. History
+replays refer to the source commit so the reviewer can inspect its diff locally.
+Do not treat the original commit subject as unquestionable ground truth.
+
+Copy `ratings.example.json` to a new `ratings.json` and fill every score from
+actual review. Empty template values are rejected. Factual adequacy and
+specificity use 1–5 scores; editing effort is characters edited, and time to a
+usable message is measured in seconds. Preference is `A`, `B`, `tie`, or
+`neither`. Summaries report completion explicitly and reject duplicate/unknown
+cases, invalid scores and mismatched packet/key pairs. Private 0700/0600 storage
+and overwrite refusal preserve review evidence. This workflow records explicit
+human measurements only; it does not infer suggestion acceptance from commits
+or mix ratings with local learning statistics.

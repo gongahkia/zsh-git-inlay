@@ -29,12 +29,15 @@ import (
 
 const (
 	SchemaVersion  = "v1"
-	CorpusVersion  = "v2"
+	CorpusVersion  = "v3"
 	DevelopmentSet = "development"
 	HeldOutSet     = "held_out"
 )
 
 //go:embed testdata/corpus-v1.json
+var frozenCorpus []byte
+
+//go:embed testdata/corpus-v3.json
 var embeddedCorpus []byte
 
 var conventionalSubject = regexp.MustCompile(`^(feat|fix|docs|test|refactor|build|chore|ci|perf|style|revert)(\(([a-z0-9._/-]+)\))?!?: .+$`)
@@ -65,6 +68,7 @@ type PreflightGenerator interface {
 type Generated struct {
 	Candidates []candidate.Candidate
 	Grounding  []grounding.Result
+	Metrics    *provider.GenerationMetrics
 }
 
 type ProviderMetadata struct {
@@ -176,7 +180,7 @@ func (generator *DaemonGenerator) GenerateDetailed(ctx context.Context, cwd stri
 		updated.Settings["runtime_cli_version"] = version
 	}
 	generator.metadata = updated
-	return Generated{Candidates: record.Candidates, Grounding: record.Grounding}, nil
+	return Generated{Candidates: record.Candidates, Grounding: record.Grounding, Metrics: record.Provider.Generation}, nil
 }
 
 func providerMetadata(metadata provider.Metadata) ProviderMetadata {
@@ -197,8 +201,17 @@ func copySettings(input map[string]string) map[string]string {
 type ProviderGenerator struct{ Provider provider.Provider }
 
 func NewOllamaGenerator(model string, timeout time.Duration) (*DaemonGenerator, error) {
-	settings := config.Default()
-	settings.Provider, settings.ProviderModel, settings.ProviderTimeout, settings.ProviderFallback = "ollama", model, timeout, "none"
+	settings, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	settings.Provider, settings.ProviderModel, settings.ProviderFallback = "ollama", model, "none"
+	if timeout < settings.ProviderTimeout {
+		settings.ProviderTimeout = timeout
+	}
+	if timeout < settings.OllamaColdTimeout {
+		settings.OllamaColdTimeout = timeout
+	}
 	return NewDaemonGenerator(settings)
 }
 
@@ -257,10 +270,12 @@ type Fixture struct {
 }
 
 type Change struct {
-	Status       string `json:"status"`
-	Path         string `json:"path"`
-	PreviousPath string `json:"previous_path,omitempty"`
-	Content      string `json:"content,omitempty"`
+	Status             string `json:"status"`
+	Path               string `json:"path"`
+	PreviousPath       string `json:"previous_path,omitempty"`
+	PreviousContent    string `json:"previous_content,omitempty"`
+	WorkingTreeContent string `json:"working_tree_content,omitempty"`
+	Content            string `json:"content,omitempty"`
 }
 
 type Options struct {
@@ -337,12 +352,13 @@ type Check struct {
 }
 
 type Result struct {
-	ID               string          `json:"id"`
-	SourceCommit     string          `json:"source_commit,omitempty"`
-	ReferenceSubject string          `json:"reference_subject"`
-	CandidateCount   int             `json:"candidate_count"`
-	Automatic        AutomaticChecks `json:"automatic"`
-	Generation       Generation      `json:"generation"`
+	ID               string                `json:"id"`
+	SourceCommit     string                `json:"source_commit,omitempty"`
+	ReferenceSubject string                `json:"reference_subject"`
+	Candidates       []candidate.Candidate `json:"candidates,omitempty"`
+	CandidateCount   int                   `json:"candidate_count"`
+	Automatic        AutomaticChecks       `json:"automatic"`
+	Generation       Generation            `json:"generation"`
 }
 
 type AutomaticChecks struct {
@@ -362,22 +378,32 @@ type AutomaticChecks struct {
 }
 
 type Generation struct {
-	ColdMilliseconds float64 `json:"cold_ms"`
-	WarmMilliseconds float64 `json:"warm_ms"`
-	ApproxAllocBytes uint64  `json:"approx_alloc_bytes"`
-	ColdTimeout      bool    `json:"cold_timeout"`
-	WarmTimeout      bool    `json:"warm_timeout"`
-	ColdError        string  `json:"cold_error,omitempty"`
-	WarmError        string  `json:"warm_error,omitempty"`
+	ColdMetrics      *provider.GenerationMetrics `json:"cold_metrics,omitempty"`
+	WarmMetrics      *provider.GenerationMetrics `json:"warm_metrics,omitempty"`
+	ColdMilliseconds float64                     `json:"cold_ms"`
+	WarmMilliseconds float64                     `json:"warm_ms"`
+	ApproxAllocBytes uint64                      `json:"approx_alloc_bytes"`
+	ColdTimeout      bool                        `json:"cold_timeout"`
+	WarmTimeout      bool                        `json:"warm_timeout"`
+	ColdError        string                      `json:"cold_error,omitempty"`
+	WarmError        string                      `json:"warm_error,omitempty"`
 }
 
 // LoadCorpus returns the public, synthetic corpus packaged with the binary.
-func LoadCorpus() (Corpus, error) {
+func LoadCorpus() (Corpus, error) { return LoadCorpusVersion(CorpusVersion) }
+
+func LoadCorpusVersion(version string) (Corpus, error) {
+	data := embeddedCorpus
+	if version == "v2" {
+		data = frozenCorpus
+	} else if version != CorpusVersion {
+		return Corpus{}, fmt.Errorf("unsupported corpus version %q", version)
+	}
 	var corpus Corpus
-	if err := json.Unmarshal(embeddedCorpus, &corpus); err != nil {
+	if err := json.Unmarshal(data, &corpus); err != nil {
 		return Corpus{}, fmt.Errorf("decode embedded evaluation corpus: %w", err)
 	}
-	if corpus.Version != CorpusVersion || len(corpus.Cases) == 0 {
+	if corpus.Version != version || len(corpus.Cases) == 0 {
 		return Corpus{}, errors.New("invalid embedded evaluation corpus")
 	}
 	for _, fixture := range corpus.Cases {
@@ -385,7 +411,7 @@ func LoadCorpus() (Corpus, error) {
 			return Corpus{}, fmt.Errorf("invalid fixture %q: %w", fixture.ID, err)
 		}
 	}
-	digest := sha256.Sum256(embeddedCorpus)
+	digest := sha256.Sum256(data)
 	corpus.Digest = hex.EncodeToString(digest[:])
 	return corpus, nil
 }
@@ -511,8 +537,8 @@ func evaluate(parent context.Context, repository string, fixture Fixture, commit
 	checks.DaemonGrounding = daemonGrounding(cold.Grounding)
 	checks.Repeatability = check(checks.Repeatability, coldErr == nil && warmErr == nil && sameCandidates(cold.Candidates, warm.Candidates))
 	return Result{
-		ID: fixture.ID, SourceCommit: commit, ReferenceSubject: fixture.ReferenceSubject, CandidateCount: len(cold.Candidates), Automatic: checks,
-		Generation: Generation{ColdMilliseconds: milliseconds(coldDuration), WarmMilliseconds: milliseconds(warmDuration), ApproxAllocBytes: after.TotalAlloc - before.TotalAlloc, ColdTimeout: coldTimeout, WarmTimeout: warmTimeout, ColdError: errorString(coldErr), WarmError: errorString(warmErr)},
+		ID: fixture.ID, Candidates: cold.Candidates, SourceCommit: commit, ReferenceSubject: fixture.ReferenceSubject, CandidateCount: len(cold.Candidates), Automatic: checks,
+		Generation: Generation{ColdMetrics: cold.Metrics, WarmMetrics: warm.Metrics, ColdMilliseconds: milliseconds(coldDuration), WarmMilliseconds: milliseconds(warmDuration), ApproxAllocBytes: after.TotalAlloc - before.TotalAlloc, ColdTimeout: coldTimeout, WarmTimeout: warmTimeout, ColdError: errorString(coldErr), WarmError: errorString(warmErr)},
 	}
 }
 
@@ -777,7 +803,11 @@ func fixtureRepository(ctx context.Context, fixture Fixture) (string, error) {
 	if needsBase {
 		for _, change := range fixture.Changes {
 			if change.Status == "M" || change.Status == "D" {
-				if err := writeFile(directory, change.Path, "previous synthetic content\n"); err != nil {
+				previous := change.PreviousContent
+				if previous == "" {
+					previous = "previous synthetic content\n"
+				}
+				if err := writeFile(directory, change.Path, previous); err != nil {
 					return fail(err)
 				}
 			}
@@ -817,6 +847,13 @@ func fixtureRepository(ctx context.Context, fixture Fixture) (string, error) {
 	}
 	if err := git(ctx, directory, nil, "add", "--all"); err != nil {
 		return fail(err)
+	}
+	for _, change := range fixture.Changes {
+		if change.WorkingTreeContent != "" {
+			if err := writeFile(directory, change.Path, change.WorkingTreeContent); err != nil {
+				return fail(err)
+			}
+		}
 	}
 	return directory, nil
 }
