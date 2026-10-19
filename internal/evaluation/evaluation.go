@@ -490,6 +490,15 @@ func ReplayHistory(ctx context.Context, repository string, generator Generator, 
 		return Report{}, err
 	}
 	report := newReport("local-history-v1", Source{Kind: "local_history", Eligible: len(commits), SkippedMerges: skipped}, generator, options)
+	identity := strings.Builder{}
+	for _, commit := range commits {
+		identity.WriteString(commit.parent)
+		identity.WriteByte(0)
+		identity.WriteString(commit.hash)
+		identity.WriteByte(0)
+	}
+	corpusHash := sha256.Sum256([]byte(identity.String()))
+	report.CorpusDigest = hex.EncodeToString(corpusHash[:])
 	objects, err := objectDirectory(ctx, repository)
 	if err != nil {
 		return Report{}, err

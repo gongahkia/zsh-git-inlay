@@ -96,7 +96,7 @@ func TestReplayHistoryReconstructsParentToCommitIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Source.Kind != "local_history" || report.Source.Eligible != 2 || len(report.Cases) != 2 {
+	if report.Source.Kind != "local_history" || len(report.CorpusDigest) != 64 || report.Source.Eligible != 2 || len(report.Cases) != 2 {
 		t.Fatalf("source=%#v cases=%#v", report.Source, report.Cases)
 	}
 	for _, result := range report.Cases {

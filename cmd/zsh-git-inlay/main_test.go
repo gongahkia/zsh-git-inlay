@@ -12,8 +12,10 @@ import (
 	"time"
 
 	"github.com/gongahkia/zsh-git-inlay/internal/activity"
+	"github.com/gongahkia/zsh-git-inlay/internal/candidate"
 	"github.com/gongahkia/zsh-git-inlay/internal/config"
 	"github.com/gongahkia/zsh-git-inlay/internal/daemon"
+	"github.com/gongahkia/zsh-git-inlay/internal/evaluation"
 	"github.com/gongahkia/zsh-git-inlay/internal/gitstate"
 	"github.com/gongahkia/zsh-git-inlay/internal/ipc"
 	"github.com/gongahkia/zsh-git-inlay/internal/learning"
@@ -506,5 +508,49 @@ func TestRepositoryStatusExplainsPrefixesWithoutGeneration(t *testing.T) {
 		if value.Repository.Status != item.status || value.Repository.Action == "" {
 			t.Fatalf("%s: %s", item.buffer, output)
 		}
+	}
+}
+
+func TestReviewCommandsPrepareAndSummarizePrivatePackets(t *testing.T) {
+	root := t.TempDir()
+	report := evaluation.Report{CorpusDigest: strings.Repeat("a", 64), Source: evaluation.Source{Kind: "test", Partition: evaluation.HeldOutSet}, Provider: evaluation.ProviderMetadata{Name: "baseline"}, Cases: []evaluation.Result{{ID: "example", Candidates: []candidate.Candidate{{Message: "chore: update files", Rank: 0}}}}}
+	left, right := filepath.Join(root, "left.json"), filepath.Join(root, "right.json")
+	for _, name := range []string{left, right} {
+		content, err := json.Marshal(report)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(name, content, 0600); err != nil {
+			t.Fatal(err)
+		}
+		report.Provider.Name = "new-provider"
+	}
+	outputDir := filepath.Join(root, "private-review")
+	if _, err := captureCommandOutput(func() error {
+		return run([]string{"review", "prepare", "--left", left, "--right", right, "--output-dir", outputDir})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	score := evaluation.HumanScore{FactualAdequacy: 4, Specificity: 3, EditCharacters: 2, TimeToUsableSeconds: 5}
+	ratings, err := json.Marshal([]evaluation.HumanRating{{ID: "example", Preferred: "A", A: score, B: score}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ratingsPath := filepath.Join(root, "ratings.json")
+	if err := os.WriteFile(ratingsPath, ratings, 0600); err != nil {
+		t.Fatal(err)
+	}
+	output, err := captureCommandOutput(func() error {
+		return run([]string{"review", "summarize", "--packet", filepath.Join(outputDir, "packet.json"), "--key", filepath.Join(outputDir, "key.json"), "--ratings", ratingsPath})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var summary evaluation.HumanSummary
+	if err := json.Unmarshal([]byte(output), &summary); err != nil {
+		t.Fatal(err)
+	}
+	if !summary.Complete || summary.Completed != 1 || !strings.Contains(summary.Evidence, "explicit_human_review") {
+		t.Fatalf("summary=%s", output)
 	}
 }
