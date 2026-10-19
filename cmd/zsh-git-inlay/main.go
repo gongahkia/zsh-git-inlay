@@ -1128,7 +1128,7 @@ func activityAdmin(arguments []string) error {
 		return err
 	}
 	operation := "activity_" + arguments[0]
-	reply, err := call(ipc.Request{Version: ipc.Version, Operation: operation, CWD: cwd}, 100*time.Millisecond)
+	reply, err := call(ipc.Request{Version: ipc.Version, Operation: operation, CWD: cwd}, 2*time.Second)
 	if err != nil {
 		return fmt.Errorf("daemon unavailable: %w", err)
 	}
@@ -1203,7 +1203,7 @@ func activityEmit(arguments []string) error {
 		data[key] = field
 	}
 	event := activity.Event{Schema: activity.SchemaVersion, Repository: state.RepoID, Worktree: state.WorktreeID, Source: *source, Kind: *kind, Timestamp: time.Now().UTC(), Data: data, Sensitivity: activity.Sensitivity(*sensitivity)}
-	reply, err := call(ipc.Request{Version: ipc.Version, Operation: "event", CWD: cwd, Event: &event}, 100*time.Millisecond)
+	reply, err := call(ipc.Request{Version: ipc.Version, Operation: "event", CWD: cwd, Event: &event}, 2*time.Second)
 	if err != nil {
 		return err
 	}
@@ -1230,7 +1230,7 @@ func activityGitState(arguments []string) error {
 	if err != nil {
 		return err
 	}
-	reply, err := call(ipc.Request{Version: ipc.Version, Operation: "activity_git_state", CWD: cwd, GitCommit: *commit}, 100*time.Millisecond)
+	reply, err := call(ipc.Request{Version: ipc.Version, Operation: "activity_git_state", CWD: cwd, GitCommit: *commit}, 2*time.Second)
 	if err != nil {
 		return err
 	}
