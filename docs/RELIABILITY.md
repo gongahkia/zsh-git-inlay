@@ -80,3 +80,20 @@ typed. The same test runs normal autosuggestions widget acceptance and cycling
 in isolated real-Zsh sessions. It cannot assess terminal pixels, theme
 contrast, keymap customizations, or subjective usefulness; those remain
 explicit maintainer checks in [RELEASE-CHECKLIST.md](RELEASE-CHECKLIST.md).
+
+## Full-helper measurement
+
+`make bench` now includes `BenchmarkSuggestHelper` with 10-entry and
+10,000-entry committed indexes, one staged change, a running daemon, and a new
+helper process for every lookup. It measures fingerprinting, socket lookup and
+composition together and reports both mean and sampled p95; setup/build time is
+excluded. Scheduled/manual CI records ten samples per size alongside race and
+bounded fuzz checks.
+
+On macOS amd64, Intel i5-8279U, Go 1.27.0, Apple Git 2.39.5 from the installed
+Command Line Tools directory, ten samples measured approximately 164 ms mean /
+172 ms p95 for 10 entries and 196 ms mean / 218 ms p95 for 10,000 entries
+(880,057 index bytes). These are host-specific helper timings, not inference or
+terminal-pixel measurements. The `/usr/bin/git` developer-tool launcher added
+substantial process-launch overhead on this host; test evidence records the
+actual Git path rather than treating cross-compilation as runtime verification.

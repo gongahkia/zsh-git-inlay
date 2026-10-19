@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -73,13 +74,19 @@ func BenchmarkSuggestHelper(b *testing.B) {
 			if err != nil {
 				b.Fatal(err)
 			}
+			samples := make([]int64, 0, b.N)
 			b.ResetTimer()
 			for index := 0; index < b.N; index++ {
+				started := time.Now()
 				output, err := helper("suggest", "--no-start", "--cwd", root, "--buffer", "git commit -m ")
+				samples = append(samples, time.Since(started).Nanoseconds())
 				if err != nil || !strings.HasPrefix(string(output), "git commit -m '") {
 					b.Fatalf("suggest: %s %v", output, err)
 				}
 			}
+			b.StopTimer()
+			sort.Slice(samples, func(i, j int) bool { return samples[i] < samples[j] })
+			b.ReportMetric(float64(samples[(len(samples)*95+99)/100-1]), "p95-ns")
 			b.ReportMetric(float64(info.Size()), "index_bytes")
 		})
 	}
