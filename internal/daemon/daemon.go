@@ -232,7 +232,7 @@ func Serve(ctx context.Context, settings config.Settings, initialCWD string, bui
 	if alreadyRunning {
 		return nil
 	}
-	previousMask := syscallUmask077()
+	previousMask := syscallSocketUmask()
 	listener, err := net.Listen("unix", socket)
 	syscallUmask(previousMask)
 	if err != nil {

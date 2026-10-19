@@ -4,5 +4,6 @@ package daemon
 
 import "syscall"
 
-func syscallUmask077() int   { return syscall.Umask(0o077) }
-func syscallUmask(value int) { syscall.Umask(value) }
+// A Unix socket starts at 0777; mask owner execute too so it is born 0600.
+func syscallSocketUmask() int { return syscall.Umask(0o177) }
+func syscallUmask(value int)  { syscall.Umask(value) }
