@@ -58,3 +58,19 @@ func TestGlobalLearningDisablePreventsObservationAndReordering(t *testing.T) {
 		t.Fatal("disabled learning accepted a record previously ranked using learning")
 	}
 }
+
+func TestEvaluationUsesExplicitMessageDefaultsRatherThanAmbientDogfoodingPreferences(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	t.Setenv("ZSH_GIT_INLAY_CONFIG", path)
+	if err := os.WriteFile(path, []byte("[commit]\ncapitalization = 'sentence'\nscope_mode = 'none'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	repository := daemonRepository(t, "evaluation.go")
+	record, err := PrepareForEvaluation(context.Background(), config.Default(), repository, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.Policy.Capitalization != "lower" || record.Policy.ScopeMode != "auto" {
+		t.Fatalf("ambient preferences changed the explicit evaluation baseline: %+v", record.Policy)
+	}
+}

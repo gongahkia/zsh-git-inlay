@@ -365,6 +365,13 @@ func LoadRepositoryPolicy(root string) (RepositoryPolicy, error) {
 		return RepositoryPolicy{}, err
 	}
 	policy := settings.RepositoryDefaults()
+	return LoadRepositoryPolicyWithDefaults(root, policy)
+}
+
+// LoadRepositoryPolicyWithDefaults keeps explicitly configured evaluation
+// generators independent of ambient dogfooding preferences, while repository
+// policy remains the final message-shape override in both workflows.
+func LoadRepositoryPolicyWithDefaults(root string, policy RepositoryPolicy) (RepositoryPolicy, error) {
 	path := filepath.Join(root, ".zsh-git-inlay.toml")
 	content, err := readContent(path)
 	if os.IsNotExist(err) {

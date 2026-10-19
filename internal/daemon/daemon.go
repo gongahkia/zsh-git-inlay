@@ -498,7 +498,7 @@ func (server *Server) generate(ctx context.Context, expected gitstate.State, cwd
 		failure = "compile context: " + compileErr.Error()
 		return
 	}
-	repositoryPolicy, policyErr := config.LoadRepositoryPolicy(expected.Root)
+	repositoryPolicy, policyErr := config.LoadRepositoryPolicyWithDefaults(expected.Root, server.preferencesSnapshot().RepositoryDefaults())
 	if policyErr != nil {
 		failure = "load repository policy: " + policyErr.Error()
 		return
